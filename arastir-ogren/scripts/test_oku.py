@@ -439,7 +439,25 @@ class PdfOkumaSirasi(unittest.TestCase):
             md, why = oku.pdf_to_markdown(b"%PDF-1.4")
         self.assertNotIn("-layout", seen["cmd"])
         self.assertIn("## Sayfa 2", md)
-        self.assertEqual(oku.CACHE_VERSION, "v4")      # eski -layout önbellekleri geçersiz
+        self.assertEqual(oku.CACHE_VERSION, "v5")      # eski -layout (v3) ve MathML-yinelemeli (v4) önbellekleri geçersiz
+
+
+class MathMlYinelemesi(unittest.TestCase):
+    """arXiv HTML: <math> hem görünen formülü hem TeX kopyasını (<annotation>) taşır; kopya metne eklenince "+3.3+3.3" çıkıyordu."""
+    HTML = ('<html><body><main><p>Fine-tuning improves repair by <math alttext="+3.3"><semantics><mrow><mo>+</mo><mn>3.3</mn></mrow>'
+            '<annotation encoding="application/x-tex">+3.3</annotation></semantics></math> to <math><semantics><mrow><mn>1.83</mn><mo>×</mo></mrow>'
+            '<annotation-xml encoding="MathML-Content"><cn>1.83</cn></annotation-xml></semantics></math> points in all six settings of this paper study '
+            'over many runs and many more words follow here to pass the main threshold of the extractor for sure okay.</p></main></body></html>')
+
+    def test_tex_kopyasi_metne_girmez(self):
+        _, blocks = oku.extract_blocks(self.HTML)
+        md = oku.to_markdown(blocks)
+        self.assertIn("+3.3 to 1.83×", md)
+        self.assertNotIn("+3.3+3.3", md)
+        self.assertNotIn("\\times", md)
+
+    def test_onbellek_surumu_v5(self):
+        self.assertEqual(oku.CACHE_VERSION, "v5")
 
 
 if __name__ == "__main__":

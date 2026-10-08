@@ -120,6 +120,15 @@ def merge_findings(findings):
     return out
 
 
+IDENT_PREFIX_RE = re.compile(r"(?i)\b(?:RFC|FIPS|ISO(?:/IEC)?|IEC|SP|CVE|CWE|CAPEC|BCP|STD|AML\.T)[\s\-]*(?:\d+[-.])*$")
+
+
+def is_identifier_number(text, num):
+    """Sayının metindeki HER geçişi bir belge/kayıt numarası bağlamındaysa (RFC 9309, FIPS 203, CVE-2024-1234) True."""
+    spans = [m.start() for m in re.finditer(re.escape(str(num).lstrip("v")), text)]
+    return bool(spans) and all(IDENT_PREFIX_RE.search(text[:s]) for s in spans)
+
+
 def host_label(url):
     """'www.usenix.org' → 'usenix'; 'news.cgtn.com' → 'cgtn' (≥4 harf değilse None)."""
     parts = [p for p in urlparse(url).netloc.lower().removeprefix("www.").split(".") if p]
@@ -159,6 +168,8 @@ def check_item(item, pool, bases, own_urls, readable_pool, all_readable=None):
     for num in ev["sayi"]:
         located = [(u, dogrula.number_positions(bases[u], num)) for u in presence]
         located = [(u, pos) for u, pos in located if pos]
+        if not located and is_identifier_number(item["metin"], num):
+            continue   # "RFC 9309", "FIPS 203", "CVE-2024-1234": belge/kayıt numarası, ölçülen bir değer değil → "sayı yok" uyarısı gürültü
         if not located:
             where = "öğenin kendi URL'sindeki sayfada" if has_own else "raporun atıf yaptığı hiçbir sayfada"
             hint = " (birim/çeviri ya da türetilmiş/hesaplanmış bir sayı olabilir)"

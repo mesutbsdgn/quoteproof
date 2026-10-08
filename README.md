@@ -217,6 +217,8 @@ python3 $S/dogrula.py my-research/notlar --plan PLAN.json --temiz-yaz my-researc
 
 Listing expected sources in `kaynaklar` both steers the worker and gives those domains +10 trust.
 
+For a deliberately narrow topic add `"min_url": 3` (any whole number from 3 to 30). A note with fewer distinct URLs than that is flagged as weak (exit code `73`); the default threshold is 8.
+
 ### Use the tools on their own
 
 ```bash
@@ -271,13 +273,17 @@ In the author's runs, a small topic takes about 30 seconds per worker, and the a
 - Worker prompts, notes and reports are Turkish by default (quotes stay in the source language).
 - The reader uses no proxy and resolves DNS itself. In an environment where traffic can leave only through a proxy, online reading and quote verification do not work; the offline unit tests are unaffected.
 - The test suites are offline unit tests; the live pipeline has been exercised end-to-end by hand, not in CI.
-- **Reliability of live research is not established.** In the first independent trial (another machine, 9 October 2026, a different model, low effort), both live tasks that finished produced notes that failed the output contract and were moved to `hatali/`, and the command-line fallback exited with a code that gave no usable diagnosis. The offline checks passed. Diagnostics were improved afterwards (see the release notes); the root cause of the contract failures was not isolated. A second trial (one task on a different topic, medium effort, OpenCode only) passed the contract: four distinct URLs and 9 of 10 quotes verified; the tenth was shortened inside the quotation marks. One passing run does not establish reliability. Treat the research workers as experimental and start with one small topic.
+- **Reliability of live research is not yet established.** Three independent live trials were reported to the author; their run records are not part of this repository.
+  - *First trial (two tasks):* both finished tasks failed the output contract and were moved to `hatali/`; the command-line fallback exited with a code that gave no usable diagnosis. The root cause was not isolated.
+  - *Second trial (one task, medium effort, OpenCode only):* the note passed the contract (`rc=0`, four distinct URLs). Four URLs is below the weak-source threshold, so the whole run exited with `73`. The first verification confirmed 9 of 10 quotes; the tenth differed from the page only in punctuation (“FIPS 203” against “(FIPS) 203”). The verifier was changed afterwards to class that as *Partial*; the live task itself was not repeated.
+  - *Third trial (three topics, low effort):* in two topics the OpenCode attempt failed (rate limit or step budget) and the command-line fallback produced accepted notes, so a third-party command-line back-end has now worked end to end once. The verifier of that day confirmed 24 of 54 findings and did not find 12; the current verifier, run again on the same notes, confirmed 34 and left 4 not found (their wording genuinely differs from the page). The rest were unreadable pages (robots.txt blocks, server errors).
+  A handful of runs does not establish reliability. Treat the research workers as experimental and start with one small topic.
 
 ## Tests
 
 ```bash
-python3 arastir-ogren/scripts/test_arastir.py   # 152 tests: parsing, contract, resume, verification, trust score, config, MCP server
-python3 arastir-ogren/scripts/test_oku.py       # 50 tests: extraction, BM25, cache, SSRF, redirects, robots.txt, PDF
+python3 arastir-ogren/scripts/test_arastir.py   # 165 tests: parsing, contract, resume, verification, trust score, config, MCP server
+python3 arastir-ogren/scripts/test_oku.py       # 52 tests: extraction, BM25, cache, SSRF, redirects, robots.txt, PDF
 ```
 
 Both suites run without network access.
@@ -308,6 +314,10 @@ There is no tagged release yet; entries are listed newest first, by commit. Meas
 - Added to Limitations: an honest account of the first independent live trial (both finished tasks failed the output contract).
 - Better failure diagnostics in `arastir.py`: a command-line back-end failure now reports the command, the exit code and the last meaningful output lines instead of a lone `}`; rate-limit (429) and step-budget exhaustion are reported as separate reasons; every attempt in `calisma.json` records its own token use and tool counts. Tests: 145 + 50.
 - Verifier: for a quote that is not on the page it now shows the nearest page passage and the word overlap. When the words match exactly and only punctuation or spacing differs, the verdict is *Partial* (with the page's wording) instead of *Not found*. Found in the second independent trial: a quote shortened to “FIPS 203, …” where the page says “(FIPS) 203, …”. A changed word or number still gives *Not found*. Tests: 152 + 50.
+- Verifier, found by re-checking a third live trial: matching now treats full-width CJK punctuation as ASCII (`（…）` ↔ `(…)`), ignores spaces next to Chinese/Japanese characters, decodes HTML entities (`&trade;` ↔ `™`) and ignores spacing in `+ 3.3` and `1.83 ×`. A changed word or number is still *Not found*. On the 54 findings of one real run it upgraded 8 findings (all checked by hand against the page text); the 4 that stay *Not found* genuinely differ from the page.
+- Verifier: a page that failed for a transient reason (timeout, server error, 429, robots.txt network error) is retried once, sequentially; permanent failures (robots.txt block, 4xx, certificate) are not.
+- Reader: MathML `<annotation>` (the TeX copy of a formula) is dropped, so arXiv pages no longer read `+3.3+3.3`. The page cache version is now v5; old caches are discarded once.
+- Audit: the "stale date" flag is one summary line instead of one line per finding. Plan field `min_url` sets the weak-source threshold per topic. `rapor_kontrol.py` no longer warns that a document identifier (`RFC 9309`, `FIPS 203`, `CVE-…`) is missing from the cited pages. Research outputs (`arastirma/`) are git-ignored. Tests: 165 + 52.
 
 ### Report-level source check ([`c88db28`](https://github.com/mesutbsdgn/quoteproof/commit/c88db28), [#4](https://github.com/mesutbsdgn/quoteproof/issues/4))
 

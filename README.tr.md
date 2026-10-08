@@ -217,6 +217,8 @@ python3 $S/dogrula.py arastirmam/notlar --plan PLAN.json --temiz-yaz arastirmam/
 
 `kaynaklar` alanına beklediğiniz kaynakları yazarsanız alt ajan doğru yöne yönelir ve bu alan adları +10 güven puanı alır.
 
+Bilerek dar tutulan bir konuya `"min_url": 3` ekleyebilirsiniz (3 ile 30 arasında bir tam sayı). Bundan az benzersiz URL içeren not zayıf sayılır (çıkış kodu `73`); varsayılan eşik 8'dir.
+
 ### Araçları tek başına kullanın
 
 ```bash
@@ -271,13 +273,17 @@ Yazarın denemelerinde küçük bir konu, alt ajan başına yaklaşık 30 saniye
 - Okuyucu proxy kullanmaz ve DNS'i kendisi çözer. Yalnızca proxy üzerinden dışarı çıkılabilen ortamlarda çevrimiçi okuma ve alıntı doğrulama çalışmaz; çevrimdışı birim testleri etkilenmez.
 - Alt ajan istemleri, notlar ve raporlar varsayılan olarak Türkçedir (alıntılar kaynağın dilinde kalır).
 - Test setleri çevrimdışı birim testleridir; canlı hat uçtan uca elle denendi, CI'da çalışmaz.
-- **Canlı araştırmanın güvenilirliği kanıtlanmış değil.** İlk bağımsız denemede (başka bir makine, 9 Ekim 2026, farklı bir model, düşük efor) biten iki canlı görev de çıktı sözleşmesini geçemedi ve notları `hatali/` klasörüne taşındı. Komut satırı yedeği de işe yarar bir teşhis vermeyen bir çıkış koduyla bitti. Çevrimdışı kontroller geçti. Teşhis sonradan iyileştirildi (bkz. sürüm notları); sözleşme hatalarının kök nedeni ayrıştırılamadı. İkinci denemede (farklı bir konuda tek görev, orta efor, yalnız OpenCode) not sözleşmeyi geçti: dört benzersiz URL ve 10 alıntıdan 9'u doğrulandı; onuncusu tırnak içinde kısaltılmıştı. Tek başarılı çalıştırma güvenilirliği kanıtlamaz. Araştırma alt ajanlarını deneysel sayın ve küçük bir konuyla başlayın.
+- **Canlı araştırmanın güvenilirliği henüz kanıtlanmış değil.** Yazara üç bağımsız canlı deneme bildirildi; çalıştırma kayıtları bu depoda yok.
+  - *İlk deneme (iki görev):* biten iki görev de çıktı sözleşmesini geçemedi ve `hatali/` klasörüne taşındı; komut satırı yedeği işe yarar bir teşhis vermeyen bir çıkış koduyla bitti. Kök neden ayrıştırılamadı.
+  - *İkinci deneme (tek görev, orta efor, yalnız OpenCode):* not sözleşmeyi geçti (`rc=0`, dört benzersiz URL). Dört URL zayıf kaynak eşiğinin altında kaldığı için koşunun tamamı `73` koduyla bitti. İlk doğrulama 10 alıntının 9'unu doğruladı; onuncusu sayfadan yalnız noktalamayla ayrılıyordu (“FIPS 203” ile “(FIPS) 203”). Doğrulayıcı sonradan bunu *Kısmen* sayacak biçimde değiştirildi; canlı görev yeniden çalıştırılmadı.
+  - *Üçüncü deneme (üç konu, düşük efor):* iki konuda OpenCode denemesi başarısız oldu (hız sınırı ya da adım bütçesi). Komut satırı yedeği kabul edilen notları üretti; böylece üçüncü taraf bir komut satırı arka ucu uçtan uca bir kez çalışmış oldu. O günkü doğrulayıcı 54 bulgunun 24'ünü doğruladı, 12'sini bulamadı. Güncel doğrulayıcı aynı notlarda 34'ü doğruladı ve 4'ünü bulunamadı bıraktı; bu 4'ünün ifadesi sayfadan gerçekten farklı. Geri kalanlar okunamayan sayfalardı (robots.txt engeli, sunucu hataları).
+  Birkaç çalıştırma güvenilirliği kanıtlamaz. Araştırma alt ajanlarını deneysel sayın ve küçük bir konuyla başlayın.
 
 ## Testler
 
 ```bash
-python3 arastir-ogren/scripts/test_arastir.py   # 152 test: ayrıştırma, sözleşme, devam, doğrulama, güven puanı, yapılandırma, MCP sunucusu
-python3 arastir-ogren/scripts/test_oku.py       # 50 test: ayıklama, BM25, önbellek, SSRF, yönlendirme, robots.txt, PDF
+python3 arastir-ogren/scripts/test_arastir.py   # 165 test: ayrıştırma, sözleşme, devam, doğrulama, güven puanı, yapılandırma, MCP sunucusu
+python3 arastir-ogren/scripts/test_oku.py       # 52 test: ayıklama, BM25, önbellek, SSRF, yönlendirme, robots.txt, PDF
 ```
 
 İki set de ağ erişimi olmadan çalışır.
@@ -308,6 +314,10 @@ Depoda henüz etiketli sürüm yok; kayıtlar en yeniden en eskiye, commit sıra
 - Sınırlar bölümüne ilk bağımsız canlı denemenin dürüst bir özeti eklendi (biten iki görevin ikisi de çıktı sözleşmesini geçemedi).
 - `arastir.py` hata teşhisi iyileşti. Komut satırı arka ucu başarısız olunca artık tek başına `}` yerine komutu, çıkış kodunu ve son anlamlı çıktı satırlarını bildirir. Hız sınırı (429) ile adım bütçesinin bitmesi ayrı nedenler olarak yazılır. `calisma.json` her denemenin kendi jeton ve araç sayısını kaydeder. Testler: 145 + 50.
 - Doğrulayıcı: sayfada bulunamayan bir alıntı için artık sayfadaki en yakın geçişi ve sözcük örtüşmesini gösterir. Sözcükler birebir aynı, yalnız noktalama ya da boşluk farklıysa karar *Bulunamadı* yerine *Kısmen* olur (sayfadaki yazımla birlikte). İkinci bağımsız denemede bulundu: sayfada “(FIPS) 203, …” yazarken alıntı “FIPS 203, …” diye kısaltılmıştı. Değişmiş bir sözcük ya da rakam yine *Bulunamadı* verir. Testler: 152 + 50.
+- Doğrulayıcı (üçüncü canlı denemenin yeniden doğrulanmasında bulundu): eşleştirme artık tam genişlikli CJK noktalamasını ASCII sayar (`（…）` ↔ `(…)`), Çince/Japonca karakterlerin yanındaki boşlukları yok sayar, HTML varlıklarını çözer (`&trade;` ↔ `™`) ve `+ 3.3` ile `1.83 ×` içindeki boşluğu önemsemez. Değişmiş bir sözcük ya da rakam yine *Bulunamadı* verir. Gerçek bir çalıştırmanın 54 bulgusunda 8 bulguyu yükseltti (hepsi sayfa metniyle elle kontrol edildi); *Bulunamadı* kalan 4'ü sayfadan gerçekten farklı.
+- Doğrulayıcı: geçici bir nedenle (zaman aşımı, sunucu hatası, 429, robots.txt ağ hatası) okunamayan sayfa sırayla bir kez yeniden denenir; kalıcı hatalar (robots.txt engeli, 4xx, sertifika) denenmez.
+- Okuyucu: MathML `<annotation>` (formülün TeX kopyası) atılır; arXiv sayfaları artık `+3.3+3.3` diye okunmaz. Sayfa önbelleği sürümü v5 oldu; eski önbellekler bir kez atılır.
+- Denetim: "eski tarih" bayrağı bulgu başına satır yerine tek özet satırı oldu. Plan alanı `min_url`, zayıf kaynak eşiğini konu başına belirler. `rapor_kontrol.py`, kaynak gösterilen sayfalarda bir belge numarasının (`RFC 9309`, `FIPS 203`, `CVE-…`) geçmemesini artık uyarı saymaz. Araştırma çıktıları (`arastirma/`) git'e girmez. Testler: 165 + 52.
 
 ### Rapor düzeyinde kaynak kontrolü ([`c88db28`](https://github.com/mesutbsdgn/quoteproof/commit/c88db28), [#4](https://github.com/mesutbsdgn/quoteproof/issues/4))
 

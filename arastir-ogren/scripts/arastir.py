@@ -188,6 +188,8 @@ def validate(plan):
         for key in ("amac", "kaynaklar", "kisitlar"):
             if key in item and not isinstance(item[key], str):
                 errors.append(f"#{i}: '{key}' metin olmalı")
+        if "min_url" in item and not (isinstance(item["min_url"], int) and not isinstance(item["min_url"], bool) and MIN_URLS <= item["min_url"] <= 30):
+            errors.append(f"#{i}: 'min_url' {MIN_URLS} ile 30 arasında tam sayı olmalı (bu konu için 'zayıf not' eşiği; varsayılan {WEAK_URLS})")
     return errors
 
 
@@ -489,6 +491,17 @@ def run_worker(item, base, args, start_delay=0.0, sequence=None):
     return result
 
 
+def weak_notes(base, results, plan):
+    """Başarılı ama kaynak kapsamı zayıf notlar. Eşik konu başına: varsayılan WEAK_URLS; dar bir konuda plan `min_url` ile değiştirir."""
+    thresholds = {item["slug"]: item.get("min_url", WEAK_URLS) for item in plan}
+    weak = []
+    for slug_ok in [r["slug"] for r in results if r["ok"]]:
+        note_path = base / "notlar" / f"{slug_ok}.md"
+        if note_path.exists() and url_count(note_path.read_text(encoding="utf-8", errors="replace")) < thresholds.get(slug_ok, WEAK_URLS):
+            weak.append(slug_ok)
+    return weak
+
+
 # ----------------------------------------------------------------------------- ana akış
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -626,13 +639,9 @@ def main():
         print(f"arastir: başarısız konular (raporda 'boşluk' olarak belirt): {', '.join(failed)}")
 
     good = [f"{r['slug']}.md" for r in results if r["ok"]]   # yalnız bu koşunun başarılı notları denetlenir/doğrulanır
-    weak = []
-    for slug_ok in [r["slug"] for r in results if r["ok"]]:
-        note_path = base / "notlar" / f"{slug_ok}.md"
-        if note_path.exists() and url_count(note_path.read_text(encoding="utf-8", errors="replace")) < WEAK_URLS:
-            weak.append(slug_ok)
+    weak = weak_notes(base, results, plan)
     if weak:
-        print(f"arastir: ⚠ ZAYIF not (<{WEAK_URLS} benzersiz kaynak): {', '.join(weak)}. Arama hız sınırına (429) takılmış olabilir: "
+        print(f"arastir: ⚠ ZAYIF not (eşik altı benzersiz kaynak; varsayılan <{WEAK_URLS}, konuda `min_url` ile değişir): {', '.join(weak)}. Arama hız sınırına (429) takılmış olabilir: "
               f"notlar/<slug>.md'yi silip `-j 2` ile `--devam` koştur ya da konuyu bölüp yeniden çalıştır.", flush=True)
     code = 0
     cmd = [sys.executable, str(HERE / "denetle.py"), str(base / "notlar")]

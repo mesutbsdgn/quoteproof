@@ -18,9 +18,11 @@ Her satıra kaynağın güvenilirlik puanı (guven.py) eklenir; 'Doğrulandı' a
 """
 import argparse
 import difflib
+import html
 import json
 import re
 import sys
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from urllib.parse import urlparse
@@ -55,12 +57,26 @@ ASCII_QUOTE_RE = re.compile(r'"([^"]{12,320})"')
 EDITORIAL_RE = r"\[(?=[^\]]*\s)[^\]]*\]|\[[A-Za-z]{3,}\]"
 
 
+ENTITY_RE = re.compile(r"&(?:#\d{1,7}|#[xX][0-9a-fA-F]{1,6}|[A-Za-z][A-Za-z0-9]{1,31});")
+# Tam genişlikli ASCII (！…～) ve CJK noktalaması ASCII'ye: sayfada "（Exploited in the wild）", çalışan "(Exploited in the wild)" yazar.
+FULLWIDTH = {c: c - 0xFEE0 for c in range(0xFF01, 0xFF5F)}
+CJK_PUNCT = {ord(k): v for k, v in {"。": ".", "、": ",", "　": " ", "「": '"', "」": '"', "『": '"', "』": '"', "《": '"', "》": '"',
+                                    "〈": '"', "〉": '"', "【": "[", "】": "]", "〔": "(", "〕": ")"}.items()}
+CJK_CHARS = "぀-ヿ㐀-䶿一-鿿豈-﫿"      # kana + Han (Hangul sözcükleri boşlukla ayrılır: dahil değil)
+CJK_SPACE_RE = re.compile(rf"(?<=[{CJK_CHARS}])\s+|\s+(?=[{CJK_CHARS}])")
+
+
 def norm(text):
+    text = ENTITY_RE.sub(lambda m: html.unescape(m.group(0)), text)   # sayfa ham markdown'sa "&trade;" ↔ alıntıdaki "™"
     text = MD_LINK_RE.sub(r"\1", text)   # sayfada [10-100x faster](url) than pip → "10-100x faster than pip"
     text = text.lower().replace("̇", "").replace("–", "-").replace("—", "-").replace("×", "x").replace(" ", " ")
+    text = text.translate(FULLWIDTH).translate(CJK_PUNCT)
+    text = re.sub(r"\+\s+(?=\d)", "+", text)          # "+ 3.3" ↔ "+3.3" (işaret-rakam arası boşluk anlam taşımaz)
+    text = re.sub(r"(?<=\d)\s+x(?![a-z0-9])", "x", text)   # "1.83 ×" ↔ "1.83×" (çarpan)
     text = re.sub(r"\[(`[^`]*`)\]", r"\1", text)      # çalışan [`kod`] yazar, sayfada bağlantı metne iner; yalnız KOD aralığını saran köşeliler düşer
     text = text.replace("|", " ")   # HTML tablo hücre ayırıcısı: sayfada "Context: | server config" ↔ alıntıda "Context: server config"
     text = re.sub(r"[`*_\"'“”‘’«»]", "", text)
+    text = CJK_SPACE_RE.sub("", text)   # Çince/Japoncada sözcük arası boşluk yok: çalışan "漏洞 CVE 分数" yazar, sayfa "漏洞CVE分数"
     return re.sub(r"\s+", " ", text).strip()
 
 
@@ -303,7 +319,7 @@ WORD_RE = re.compile(r"\w+")
 NEAR_MIN_WORDS = 4         # bundan kısa alıntıda "en yakın geçiş" anlamsız
 NEAR_THRESHOLD = 0.6       # sözcük örtüşmesi bunun altındaysa yakın geçiş gösterilmez (ilgisiz sayfa)
 NEAR_MAX_ANCHORS = 300     # aday pencere sayısı sınırı (büyük sayfalarda sürenin kontrolü)
-DIGIT_PUNCT_RE = re.compile(r"\d[.,]\d")
+DECIMAL_RE = re.compile(r"\d+(?:[.,]\d+)+")
 
 
 def yakin_gecis(alinti, page_norm, context=3):
@@ -311,7 +327,7 @@ def yakin_gecis(alinti, page_norm, context=3):
 
     oran = alıntı sözcüklerinin, sayfadaki en iyi pencerede SIRAYLA bulunan payı (noktalama yok sayılır). `noktalama_farki` yalnız şu durumda True:
     alıntının TÜM sözcükleri sayfada bitişik ve aynı sırada, fark yalnız noktalama/boşluk (ör. alıntı "FIPS 203, …" sayfa "(FIPS) 203, …").
-    Alıntıda rakam-noktalama-rakam (1.5 / 1,5) varsa asla True olmaz: ondalık/binlik ayırıcı anlam taşır.
+    Alıntıdaki her ondalık/binlik sayı (1.5 / 1,5) sayfa geçişinde AYNI yazımla bulunmalıdır; ayırıcı farkı (1.5 ↔ 1,5) anlam taşıdığı için True olmaz.
     Bu bir yardımcıdır; yakın geçiş "birebir" demek değildir, karar yine metin eşleşmesiyle verilir."""
     qn = norm(alinti)
     q = [m.group(0) for m in WORD_RE.finditer(qn)]
@@ -351,8 +367,9 @@ def yakin_gecis(alinti, page_norm, context=3):
     lo, hi = max(0, first - context), min(len(spans) - 1, last + context)
     passage = page_norm[spans[lo][0]:spans[hi][1]]
     contiguous = len(blocks) == 1 and blocks[0].size == len(q)
+    numbers_same = all(n in passage for n in DECIMAL_RE.findall(qn))
     return {"oran": round(ratio, 2), "gecis": passage[:300],
-            "noktalama_farki": bool(contiguous and not DIGIT_PUNCT_RE.search(qn))}
+            "noktalama_farki": bool(contiguous and numbers_same)}
 
 
 def en_yakin_alinti(alintilar, page_norm):
@@ -367,6 +384,27 @@ def en_yakin_alinti(alintilar, page_norm):
 def collect(notes_dir, files=None):
     paths = sorted(p for p in Path(notes_dir).glob("*.md") if p.is_file() and (not files or p.name in set(files)))
     return [denetle.analyze(p) for p in paths]
+
+
+# Geçici hatalar: sayfa bir kez daha denenir (arXiv paralel yükte "toplam süre aşıldı", CDN 5xx/521, robots.txt ağ hatası).
+# Kalıcı olanlar (robots.txt engeli, 403/404, sertifika) yeniden denenmez.
+TRANSIENT_RE = re.compile(r"(?i)toplam süre aşıldı|zaman aşımı|timed out|HTTP 5\d\d|HTTP 429|okunamadı \(ağ hatası\)|connection (?:reset|refused)")
+RETRY_PAUSE = 2.0
+
+
+def retry_transient(pages, cache_dir=None):
+    """Geçici hatayla okunamayan sayfaları SIRAYLA bir kez yeniden dener (paralel yük hatanın nedeniydi). Yerinde günceller; yeniden denenenleri döndürür."""
+    retried = []
+    for url, page in list(pages.items()):
+        err = page.get("hata", "")
+        if page["ok"] or not TRANSIENT_RE.search(err) or "izin vermiyor" in err:
+            continue
+        time.sleep(RETRY_PAUSE)
+        again = oku.load(url, cache_dir=cache_dir)
+        again["yeniden_denendi"] = True
+        pages[url] = again
+        retried.append(url)
+    return retried
 
 
 def run(notes_dir, limit=0, jobs=4, cache_dir=None, files=None, hints=None):
@@ -390,13 +428,15 @@ def run(notes_dir, limit=0, jobs=4, cache_dir=None, files=None, hints=None):
     with ThreadPoolExecutor(max_workers=max(1, jobs)) as pool:
         for url, page in zip(urls, pool.map(lambda u: oku.load(u, cache_dir=cache_dir), urls)):
             pages[url] = page
+    retry_transient(pages, cache_dir)
     rows = []
     for strength, name, f, ev in chosen:
         best = None
         for url in f["urls"][:2]:  # alıntıyı yazan URL ilk olmayabilir: çok kaynaklı maddede hepsine bak
             page = pages[url]
             if not page["ok"]:
-                row = {"karar": "Erişilemedi", "bulunan": 0, "toplam": 0, "eksik": [], "neden": page["hata"], "url": url}
+                row = {"karar": "Erişilemedi", "bulunan": 0, "toplam": 0, "eksik": [],
+                       "neden": page["hata"] + (" (1 kez yeniden denendi)" if page.get("yeniden_denendi") else ""), "url": url}
             else:
                 page_norm = page_text_norm(page["markdown"])
                 verdict, found, total, missing = judge(ev, page_norm)

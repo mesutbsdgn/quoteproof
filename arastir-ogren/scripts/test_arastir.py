@@ -1383,6 +1383,121 @@ class YakinGecis(unittest.TestCase):
         self.assertNotIn("en yakın geçiş", text)
 
 
+class NormalizasyonGevsetme(unittest.TestCase):
+    """Gerçek bir canlı koşuda (9 Ekim 2026, 54 bulgu) "Bulunamadı"nın çoğu uydurma değil biçim farkıydı: tam genişlikli Çince noktalama, CJK'de
+    boşluk, HTML varlığı (&trade;), MathML kopyası. Gevşetme yalnız bu biçim farklarını kapsar; değişmiş sözcük/rakam yine bulunamaz."""
+    def _karar(self, quote, page):
+        ev = dogrula.evidence(f'x — "{quote}" — [U](https://x.y)')
+        return dogrula.judge(ev, dogrula.page_text_norm(page))[0]
+
+    def test_tam_genislikli_cince_noktalama(self):
+        page = "…核心漏洞发现：真正被黑客组织在野利用（Exploited in the wild）的仅有 2 个（占比仅 0.67%），分别为"
+        self.assertEqual(self._karar("真正被黑客组织在野利用(Exploited in the wild)的仅有 2 个(占比仅 0.67%)", page), "Doğrulandı")
+
+    def test_cjk_bitisiginde_bosluk_farki(self):
+        page = "对此仅凭CVSS分数进行优先级排序，会导致大量精力浪费在不可达的漏洞上。修复成本"
+        self.assertEqual(self._karar("仅凭 CVSS 分数进行优先级排序,会导致大量精力浪费在不可达的漏洞上。", page), "Doğrulandı")
+
+    def test_degismis_cince_sozcuk_yine_bulunamaz(self):
+        page = "根据Anthropic的数据，Mythos Preview能以72.4%的成功率生成可用的漏洞利用代码，已发现"
+        self.assertEqual(self._karar("Mythos Preview 却能以72.4%的成功率生成可用的漏洞利用代码", page), "Bulunamadı")
+
+    def test_html_varligi_ve_isaretli_sayi_ve_carpan(self):
+        self.assertEqual(self._karar("MITRE ATLAS™ (Adversarial Threat Landscape for AI Systems), a public knowledge base",
+                                     "distributes data for MITRE ATLAS&trade; (Adversarial Threat Landscape for AI Systems), a public knowledge base of"), "Doğrulandı")
+        self.assertEqual(self._karar("improves repair by + 3.3 to + 14.7 points", "this improves repair by +3.3 to +14.7 points in all"), "Doğrulandı")
+        self.assertEqual(self._karar("inflates the patching task solve rate of agents by 1.83 × on average", "inflates the patching task solve rate of agents by 1.83× on average"), "Doğrulandı")
+
+    def test_degisen_rakam_ve_ondalik_ayirici_yine_bulunamaz(self):
+        self.assertNotEqual(self._karar("improves repair by + 3.3 to + 14.7 points", "this improves repair by +4.3 to +14.7 points in all"), "Doğrulandı")
+        self.assertNotEqual(self._karar("the monthly limit is 1.5 million requests", "note: the monthly limit is 1,5 million requests per key"), "Doğrulandı")
+
+    def test_yakin_gecis_ondalik_sayi_ayni_yazimdaysa_noktalama_farki_sayilir(self):
+        r = dogrula.yakin_gecis("the rate was 0.67 percent here today", dogrula.page_text_norm("see (the rate was 0.67 percent) here today and more"))
+        self.assertTrue(r["noktalama_farki"])
+
+
+class Gecici_Hata_Yeniden_Deneme(unittest.TestCase):
+    def test_gecici_hata_bir_kez_yeniden_denenir_kalici_hata_denenmez(self):
+        calls = []
+        def load(url, cache_dir=None):
+            calls.append(url)
+            return {"ok": True, "markdown": "iyi", "hata": ""}
+        pages = {"https://a/slow": {"ok": False, "hata": "toplam süre aşıldı (yavaş sunucu)"},
+                 "https://a/502": {"ok": False, "hata": "HTTP 502"},
+                 "https://a/404": {"ok": False, "hata": "HTTP 404"},
+                 "https://a/robots": {"ok": False, "hata": "robots.txt bu yola izin vermiyor (https://a/robots.txt)"},
+                 "https://a/ok": {"ok": True, "markdown": "x", "hata": ""}}
+        with mock.patch.object(dogrula.oku, "load", side_effect=load), mock.patch.object(dogrula.time, "sleep"):
+            retried = dogrula.retry_transient(pages)
+        self.assertEqual(sorted(retried), ["https://a/502", "https://a/slow"])
+        self.assertEqual(sorted(calls), ["https://a/502", "https://a/slow"])
+        self.assertTrue(pages["https://a/slow"]["ok"] and pages["https://a/slow"]["yeniden_denendi"])
+        self.assertFalse(pages["https://a/404"]["ok"])
+
+    def test_yeniden_deneme_yine_basarisizsa_neden_bunu_soyler(self):
+        note = '# k\n## S\n### Alıntılı bulgular\n- A — "a long enough quotation here" — [U](https://slow.example/x)\n'
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / "n.md").write_text(note, encoding="utf-8")
+            with mock.patch.object(dogrula.oku, "load", return_value={"ok": False, "markdown": "", "hata": "HTTP 521"}), \
+                 mock.patch.object(dogrula.time, "sleep"):
+                rows, _ = dogrula.run(d, limit=0, jobs=1)
+        self.assertEqual(rows[0]["karar"], "Erişilemedi")
+        self.assertIn("1 kez yeniden denendi", rows[0]["neden"])
+
+
+class EskiTarihBayragi(unittest.TestCase):
+    def _section(self, n_old, extra=""):
+        lines = "".join(f'- Bulgu {i} — "a quote that is long enough {i}" — [N](https://csrc.nist.gov/p{i}) (2024-08, birincil)\n' for i in range(n_old))
+        note = f"# k\n## S\n### Özet\nx\n### Alıntılı bulgular\n{lines}{extra}### Çıkarımlar\n- c\n### Boşluklar\n- b\n"
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / "n.md").write_text(note, encoding="utf-8")
+            results = [denetle.analyze(Path(d) / "n.md")]
+        return "\n".join(denetle.trust_section(results, {}))
+
+    def test_eski_tarih_bayraklari_tek_satirda_toplanir(self):
+        s = self._section(9)
+        self.assertFalse(any(l.startswith("- `") and "güncelliği" in l for l in s.splitlines()))   # bulgu başına satır yok
+        self.assertIn("Eski tarih: 9 bulgunun bildirilen tarihi 18 aydan eski (2024-08 … 2024-08)", s)
+        self.assertNotIn("Bayraklı bulgular", s)
+
+    def test_zayif_kaynak_bayragi_bulgu_basina_kalir(self):
+        extra = '- Zayıf — "another long enough quote here" — [M](https://medium.com/x) (2026-09, ikincil)\n'
+        s = self._section(2, extra)
+        self.assertIn("Bayraklı bulgular", s)
+        self.assertIn("zayıf kaynak", s)
+        self.assertIn("Eski tarih: 2 bulgunun", s)
+
+
+class PlanMinUrl(unittest.TestCase):
+    def test_min_url_dogrulama(self):
+        ok = [{"slug": "a", "konu": "k", "sorular": ["s?"], "min_url": 3}]
+        self.assertEqual(arastir.validate(ok), [])
+        for bad in (2, 31, "5", True, 4.5):
+            errs = arastir.validate([{"slug": "a", "konu": "k", "sorular": ["s?"], "min_url": bad}])
+            self.assertTrue(any("min_url" in e for e in errs), bad)
+
+    def test_zayif_not_esigi_konu_basinadir(self):
+        def note(n):
+            return "# k\n## S\n### Alıntılı bulgular\n" + "".join(f"- b — \"q{i} long enough\" — [U](https://s{i}.example/x)\n" for i in range(n))
+        with tempfile.TemporaryDirectory() as d:
+            base = Path(d); (base / "notlar").mkdir()
+            (base / "notlar" / "dar.md").write_text(note(4)); (base / "notlar" / "genis.md").write_text(note(4))
+            results = [{"slug": "dar", "ok": True}, {"slug": "genis", "ok": True}]
+            plan = [{"slug": "dar", "min_url": 3}, {"slug": "genis"}]
+            self.assertEqual(arastir.weak_notes(base, results, plan), ["genis"])      # dar: 4 ≥ 3 → zayıf değil; genis: 4 < 8 → zayıf
+
+
+class TanimlayiciNumara(unittest.TestCase):
+    def test_belge_numaralari_veri_sayilmaz(self):
+        f = rapor_kontrol.is_identifier_number
+        self.assertTrue(f("robots.txt (RFC 9309) uyarınca", "9309"))
+        self.assertTrue(f("Standart FIPS 203 ve FIPS-203", "203"))
+        self.assertTrue(f("CVE-2024-1234 açığı", "1234"))
+        self.assertFalse(f("RFC 9309 ve ayrıca 9309 istek", "9309"))     # bir geçiş ölçülen değer: yine denetlenir
+        self.assertFalse(f("sistem 9309 istek işledi", "9309"))
+
+
 class HataTeshisi(unittest.TestCase):
     """İlk bağımsız canlı denemede (9 Ekim 2026) görülen yararsız teşhisler: CLI "rc=5" + yalnız "}" ve belirsiz "429 ya da adım bütçesi"."""
 

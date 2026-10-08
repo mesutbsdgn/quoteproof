@@ -139,6 +139,7 @@ def check_url(url, timeout=8):
 GITHUB_RE = re.compile(r"https?://github\.com/([A-Za-z0-9][A-Za-z0-9-]{0,38})/([A-Za-z0-9._-]+)")
 GITHUB_SKIP = {"orgs", "features", "topics", "search", "marketplace", "sponsors", "settings", "about", "pricing", "login", "collections", "trending", "explore"}
 STALE_DAYS = 365
+STALE_FLAG_PREFIX = "bildirilen tarih"   # guven.assess eski-tarih bayrağının başı
 
 
 def github_repos(results):
@@ -234,9 +235,16 @@ def trust_section(results, hints):
         L.append(f"| {key} | {s['sinif']} | {s['puan']} | {'; '.join(s['gerekce'][1:]) or '—'} |")
     avg = sum(s["puan"] for s in rows.values()) / len(rows)
     L += ["", f"Ortalama alan adı puanı: {avg:.0f}/100 ({len(rows)} alan adı)."]
+    stale = [(d, t, f) for d, t, f in flagged if f.startswith(STALE_FLAG_PREFIX)]
+    flagged = [x for x in flagged if not x[2].startswith(STALE_FLAG_PREFIX)]
     if flagged:
         L += ["", "Bayraklı bulgular (rapora almadan önce Claude kontrol etmeli):"]
         L += [f"- `{d}` — {t[:110]} → **{flag}**" for d, t, flag in flagged[:20]]
+    if stale:   # tek tek sıralamak gürültü: 10 bulgunun 9'u "26 ay önce" bayrağı alıyordu (yayımlanmış standart tarihi tek başına sorun değildir)
+        dates = sorted(re.findall(r"bildirilen tarih (\d{4}-\d{2})", " ".join(f for _, _, f in stale)))
+        span = f" ({dates[0]} … {dates[-1]})" if dates else ""
+        L += ["", f"Eski tarih: {len(stale)} bulgunun bildirilen tarihi {guven.STALE_MONTHS} aydan eski{span}. "
+                  "Hızlı değişen konularda (sürüm, fiyat, ürün özelliği) güncelliği kontrol et; yayımlanmış standart ve resmî belgelerde tarih tek başına sorun değildir."]
     return L + [""]
 
 

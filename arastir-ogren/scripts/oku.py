@@ -64,13 +64,14 @@ ROBOTS_MAX_PATTERN = 2048
 ROBOTS_MAX_RULES = 5000
 ROBOTS_ENABLED = os.environ.get("OKU_ROBOTS", "1") != "0"   # çalışan MCP'sine bu değişken geçmez (env izin listesi): çalışanlar HER ZAMAN uyar
 CACHE_TTL = 6 * 3600
-CACHE_VERSION = "v4"   # v4: PDF metni okuma sırasıyla çıkarılır (önceki -layout önbellekleri atılır)
+CACHE_VERSION = "v5"   # v5: MathML <annotation> (TeX kopyası) atılır: arXiv "+3.3+3.3" yinelemesi (v4: PDF okuma sırası)
 TEXT_TYPES = ("text/html", "application/xhtml+xml", "text/plain", "text/markdown", "text/x-markdown")
 INJECTION = re.compile(
     r"ignore (all |the )?(previous|prior|above) (instructions|prompts)|disregard (the )?(previous|above)|"
     r"you are now|system prompt|önceki (tüm )?talimatları (yok say|unut)|reveal your (system )?prompt|"
     r"do not tell the user|new instructions:", re.I)
-DROP_TAGS = {"script", "style", "noscript", "svg", "iframe", "canvas", "button", "select", "template"}  # `form` bilerek yok (ASP.NET gövdeyi sarar)
+DROP_TAGS = {"script", "style", "noscript", "svg", "iframe", "canvas", "button", "select", "template",
+             "annotation", "annotation-xml"}  # `form` bilerek yok (ASP.NET gövdeyi sarar); MathML <annotation> görünen formülün TeX kopyasıdır ("+3.3+3.3")
 BLOCK_HINT = re.compile(r"(^|[\s_-])(nav|navbar|menu|footer|header|sidebar|side-bar|aside|cookie|consent|banner|advert|ads?|promo|"
                         r"share|social|breadcrumb|related|recommend|newsletter|subscribe|popup|modal|comment|toc|skip)([\s_-]|$)", re.I)
 VOID_TAGS = {"br", "hr", "img", "meta", "link", "input", "source", "wbr", "area", "base", "col", "embed", "param", "track"}
