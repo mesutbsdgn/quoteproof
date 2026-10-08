@@ -3,8 +3,8 @@
 </p>
 
 <p align="center">
-  <b>An evidence-first research skill for AI agents.</b><br>
-  Cheap parallel workers do the searching. Nothing they write is trusted until plain Python has found their quotes on the pages they cite.
+  <b>An evidence-first research pipeline that catches the quotes AI agents invent.</b><br>
+  Cheap parallel workers do the searching. A finding is trusted only once plain Python has found its quote, word for word, on the page it cites.
 </p>
 
 <p align="center">
@@ -21,7 +21,11 @@
 
 AI research agents write fluently and fast, but they **invent quotes**. The usual fix is to ask a second LLM to fact-check the first. That is slow, costs tokens, and tends to fail in the same ways.
 
-Quoteproof makes the claim itself checkable. Every finding a worker writes must be a **word-for-word quote in the page's original language, plus a URL**. A script with **zero LLM tokens** then opens each cited page and looks for that exact text.
+Quoteproof does not hand that check to another model; it looks at **the source itself**. It works in three steps:
+
+1. **A strict rule:** the cheap search models (called *workers* in this document) must write every finding as a **word-for-word quote in the page's original language, plus a URL**.
+2. **A zero-token check:** a Python script that calls **no LLM** opens each cited page and looks for the quote, number and version.
+3. **Synthesis:** findings that fail are flagged or dropped. The rest go to the **coordinating model**, the main model that does the final review and writes the report.
 
 ```text
 What a worker wrote (illustrative)                       What Quoteproof says
@@ -30,8 +34,6 @@ What a worker wrote (illustrative)                       What Quoteproof says
 "10-100x faster than pip"           — github.com/…/uv     ✓ Verified   found on the cited page
 "a paraphrase nobody can locate"    — blog.example.com    ✗ Not found  paraphrases cannot be verified
 ```
-
-Only findings that survive this check go to the coordinating model for final review and the written report.
 
 > **Measured on the author's own runs:** requiring verbatim quotes raised the share of findings that could be auto-verified from **3 of 14 to about 14 of 15**. A later round of checker fixes took one real run from **7 of 21 to 19 of 21** verified; the remainder were legitimate paraphrases correctly flagged for a human look.
 

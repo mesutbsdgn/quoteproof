@@ -3,8 +3,8 @@
 </p>
 
 <p align="center">
-  <b>Yapay zekâ ajanları için kanıt öncelikli araştırma becerisi.</b><br>
-  Aramayı ucuz modeller paralel yürütür. Bir bulguya, alıntısı gösterdiği sayfada düz bir Python betiğiyle bulunana kadar güvenilmez.
+  <b>Yapay zekâ ajanlarının uydurduğu alıntıları yakalayan, kanıt öncelikli araştırma hattı.</b><br>
+  Aramayı ucuz modeller paralel yürütür. Bir bulguya ancak alıntısı, gösterdiği sayfada kelimesi kelimesine bulunursa güvenilir; bu kontrolü model değil, düz bir Python betiği yapar.
 </p>
 
 <p align="center">
@@ -21,7 +21,11 @@
 
 Yapay zekâ araştırma ajanları hızlı ve akıcı yazar, ama **alıntı uydurur**. Alışılmış çözüm, ilk modelin işini ikinci bir LLM'e kontrol ettirmektir. Bu yöntem yavaştır, jeton harcar ve çoğu zaman ilk modelle aynı yerlerde yanılır.
 
-Quoteproof bulgunun kendisini denetlenebilir kılar. Çalışanın yazdığı her bulgu, **sayfanın özgün dilinde kelimesi kelimesine bir alıntı ve bir URL** içermek zorundadır. **Hiç LLM jetonu harcamayan** bir betik, gösterilen her sayfayı açıp bu metni arar.
+Quoteproof bu kontrolü bir modele bırakmaz, **kaynağın kendisine** bakar. İş üç adımda yürür:
+
+1. **Katı kural:** Aramayı yapan ucuz modeller (belgede *çalışan* diye anılır) her bulguyu **sayfanın özgün dilinde, kelimesi kelimesine bir alıntı ve bir URL** ile yazmak zorundadır.
+2. **Sıfır jetonlu denetim:** **Hiç LLM çağırmayan** bir Python betiği, gösterilen her sayfayı açıp alıntıyı, rakamı ve sürümü arar.
+3. **Sentez:** Denetimi geçemeyen bulgular işaretlenir ya da elenir. Geçenler, son incelemeyi yapıp raporu yazan **koordinatör modele** gider.
 
 ```text
 Çalışanın yazdığı (örnek amaçlı)                         Quoteproof ne der
@@ -31,9 +35,7 @@ Quoteproof bulgunun kendisini denetlenebilir kılar. Çalışanın yazdığı he
 "kimsenin bulamayacağı bir parafraz" — blog.example.com   ✗ Bulunamadı  parafraz doğrulanamaz
 ```
 
-Yalnızca bu denetimi geçen bulgular, son inceleme ve raporun yazımı için koordinatör modele gider.
-
-> **Yazarın kendi koşularında ölçüldü:** Birebir alıntı şartı, otomatik doğrulanabilen bulguların oranını **14 bulgudan 3'ünden, 15 bulgudan yaklaşık 14'üne** çıkardı. Denetleyicide sonradan yapılan düzeltmeler, gerçek bir koşuda doğrulanan bulguları **21'de 7'den 21'de 19'a** yükseltti. Geri kalanlar, bir insanın bakması gerektiği için doğru biçimde işaretlenen meşru parafrazlardı.
+> **Yazarın kendi koşularında ölçüldü:** Birebir alıntı şartıyla, otomatik doğrulanabilen bulgu oranı yaklaşık **%21'den (14 bulguda 3) %93'e (15 bulguda 14)** çıktı. Denetleyicide sonradan yapılan düzeltmelerle, gerçek bir koşuda 21 bulgudan doğrulananların sayısı **7'den 19'a** yükseldi. Geri kalanlar, bir insanın bakması gerektiği için doğru biçimde işaretlenen meşru parafrazlardı.
 
 ## Fikir
 
