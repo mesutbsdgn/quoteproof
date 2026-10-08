@@ -10,7 +10,7 @@
 <p align="center">
   <a href="README.md">English</a> · <a href="README.tr.md">Türkçe</a>
   &nbsp;|&nbsp;
-  <img alt="license" src="https://img.shields.io/badge/license-MIT-blue">
+  <img alt="license" src="https://img.shields.io/badge/license-AGPL--3.0-blue">
   <img alt="python" src="https://img.shields.io/badge/python-3.9%2B-informational">
   <img alt="dependencies" src="https://img.shields.io/badge/dependencies-none-success">
 </p>
@@ -190,7 +190,7 @@ The file names your models, the *name* of the environment variable that holds yo
 ```bash
 S=~/.claude/skills/arastir-ogren/scripts
 
-# 1) research: workers run in parallel (about 30 s per small topic in our runs)
+# 1) research: workers run in parallel (about 30 s per small topic in the author's runs)
 python3 $S/arastir.py PLAN.json -d my-research -j 3 -e dusuk
 #    interrupted?  add  --devam  to continue where it stopped
 
@@ -258,7 +258,7 @@ The checking tools need none. The research workers need an agent runtime and an 
 The tool began as a Turkish-language workflow. Section names in notes (`Özet`, `Alıntılı bulgular`, …) and command-line flags are Turkish and are part of the format the parsers read; the *content* can be in any language, and quotes always stay in the source's language.
 
 **How slow is it?**
-In our runs, a small topic takes about 30 seconds per worker, and the audit + verification of a whole run takes a few seconds of CPU plus the time to fetch the cited pages.
+In the author's runs, a small topic takes about 30 seconds per worker, and the audit + verification of a whole run takes a few seconds of CPU plus the time to fetch the cited pages.
 
 ## Limitations
 
@@ -297,9 +297,10 @@ docs/fact-check/          the fact-check of this README (see below)
 
 There is no tagged release yet; entries are listed newest first, by commit. Measurements are detailed in the [closed issues](https://github.com/mesutbsdgn/quoteproof/issues?q=is%3Aissue+is%3Aclosed).
 
-### Unreleased (documentation)
+### Unreleased (documentation and license)
 
-- README rewritten; the Turkish text was simplified.
+- **License changed from MIT to GNU AGPL-3.0.** Earlier commits (up to `2fa793e`) stay available under the MIT License.
+- README rewritten; the Turkish text was simplified. In Turkish the search models are now called *alt ajan* (sub-agent) because *çalışan* means a human employee; "run" is now *çalıştırma/deneme*, not *koşu*; two headings were reworded.
 - Safety wording narrowed: deny-by-default tool permissions and environment filtering apply to OpenCode workers only, and a custom CLI back-end is outside that boundary. Secret masking covers only some key-like values in error text.
 - Config lookup path corrected (`quoteproof.json` in the skill folder, not `./quoteproof.json`).
 - Added to Limitations: the reader uses no proxy, so it does not work where traffic can only leave through a proxy.
@@ -329,7 +330,9 @@ There is no tagged release yet; entries are listed newest first, by commit. Meas
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+GNU Affero General Public License, version 3 (AGPL-3.0-only). Full text: [LICENSE](LICENSE). Copyright © 2026 mesutbsdgn.
+
+Commits up to and including `2fa793e` were published under the MIT License. Anyone who obtained those versions keeps the rights the MIT License gave them; the AGPL applies to this and later versions.
 
 ---
 
