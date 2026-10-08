@@ -18,6 +18,7 @@ import arastir  # noqa: E402
 import denetle  # noqa: E402
 import dogrula  # noqa: E402
 import guven  # noqa: E402
+import rapor_kontrol  # noqa: E402
 
 
 # Testler makinedeki gerçek yapılandırmaya/anahtara BAKMAZ: geçici, jenerik bir yapılandırma kullanılır.
@@ -1204,6 +1205,124 @@ class GuvenlikAlaniSiniflari(unittest.TestCase):
     def test_birincil_denen_owasp_artik_uyusmazlik_bayragi_almaz(self):
         f = {"metin": "x (2026-09, birincil)", "urls": ["https://cheatsheetseries.owasp.org/cheatsheets/Clickjacking_Defense_Cheat_Sheet.html"]}
         self.assertEqual(guven.assess(f, today=datetime.date(2026, 10, 8))["bayrak"], [])
+
+
+class RaporKontrol(unittest.TestCase):
+    """Rapor düzeyi kaynak kontrolü (sentezde doğan sayı–özne atıf hataları)."""
+    FILL = "Lorem ipsum dolor sit amet consectetur adipiscing elit. " * 70
+
+    def _pages(self, **by_url):
+        pages = {u: {"ok": True, "markdown": md, "hata": ""} for u, md in by_url.items()}
+        return lambda u: pages.get(u, {"ok": False, "markdown": "", "hata": "yok"})
+
+    def _run(self, report, loader, **kw):
+        return rapor_kontrol.run(report, loader=loader, **kw)
+
+    def _kinds(self, res):
+        return sorted((f["seviye"], f["tur"]) for r in res["ogeler"] for f in r["bulgular"])
+
+    def test_ayristirma_oge_turleri_ve_kod_citi_atlanir(self):
+        text = "# Başlık\n\nParagraf bir\ndevam eder.\n\n- madde bir\n  devam\n- madde iki\n\n> alıntı satır 1\n> satır 2\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n```\n- kodda madde\n```\n"
+        items = rapor_kontrol.parse_items(text)
+        self.assertEqual([i["tur"] for i in items], ["paragraf", "madde", "madde", "alinti", "tablo", "tablo"])
+        self.assertEqual(items[1]["metin"], "madde bir devam")
+        self.assertEqual(items[3]["metin"], "alıntı satır 1 satır 2")
+        self.assertTrue(all("kodda" not in i["metin"] for i in items))
+        self.assertEqual(items[0]["baslik"], "Başlık")
+
+    def test_sayi_terimden_uzaksa_baglam_suphesi_yakinsa_temiz(self):
+        paper = "Abstract. we show that our attacks have success rates ranging from 43% to 98%, defense works. " + self.FILL + " They use a drag-and-drop action once. "
+        near = "Abstract. they use a drag-and-drop action. we show success rates ranging from 43% to 98%. " + self.FILL
+        report = "- Drag-and-drop clickjacking: başarı oranı %43–98 ölçülmüş [U](https://a.example/p)\n"
+        far = self._run(report, self._pages(**{"https://a.example/p": paper}))
+        self.assertEqual(self._kinds(far), [("uyarı", "bağlam-şüphesi")])
+        ok = self._run(report, self._pages(**{"https://a.example/p": near}))
+        self.assertEqual(self._kinds(ok), [])
+
+    def test_teknik_terim_sayfada_yok_ama_baska_kaynakta_var_ise_uyari(self):
+        abstract = "Abstract. we show success rates ranging from 43% to 98% for all attacks. " + self.FILL
+        full = "Full paper. attackers use a drag-and-drop action to steal content. " + self.FILL
+        row = "| **Drag-and-drop clickjacking** | mekanizma | %43-98 ölçülmüş | [U](https://a.example/p) |\n"
+        loader = self._pages(**{"https://a.example/p": abstract, "https://a.example/full": full})
+        res = self._run(row, loader, notes_urls=["https://a.example/full"])            # tam metin notların kaynağı: terim orada geçiyor
+        self.assertEqual(self._kinds(res), [("uyarı", "terim-sayfada-yok")])
+        self.assertIn("başka yerde geçiyor", res["ogeler"][0]["bulgular"][0]["mesaj"])
+        self.assertEqual(self._kinds(self._run(row, loader)), [])                       # notlar verilmedi: terim hiçbir yerde yok → sus
+
+    def test_turkce_tireli_sozcuk_hicbir_sayfada_yoksa_susar(self):
+        page = "Abstract. 90% of the global supply of such cells is produced abroad. " + self.FILL
+        row = "- Lityum-iyon hücrelerin %90'ı yurt dışında üretiliyor [U](https://a.example/p)\n"
+        self.assertEqual(self._kinds(self._run(row, self._pages(**{"https://a.example/p": page}), notes_urls=[])), [])
+
+    def test_urlsiz_ogede_bagam_yalniz_adi_anilan_kaynakta_yapilir(self):
+        paper = "USENIX Security 2012. Abstract. we show success rates ranging from 43% to 98% for all attacks. " + self.FILL + " a drag-and-drop action. "
+        other = "Unrelated page quoting 43% somewhere. " + self.FILL
+        pages = self._pages(**{"https://www.usenix.org/x": paper, "https://other.example/y": other})
+        src = "- (kaynaklar) [U](https://www.usenix.org/x) [V](https://other.example/y)\n"
+        named = self._run("- Drag-and-drop clickjacking, USENIX 2012: başarı %43-98\n" + src, pages)
+        self.assertEqual({k for k in self._kinds(named) if k[0] == "uyarı"}, {("uyarı", "bağlam-şüphesi")})
+        unnamed = self._run("- Drag-and-drop clickjacking: başarı %43-98\n" + src, pages)   # kaynak anılmıyor: rastlantısal eşleşme → yalnız bilgi
+        self.assertEqual([k for k in self._kinds(unnamed) if k[0] != "bilgi"], [])
+
+    def test_pdf_tireleme_terimi_sayfada_sayilir(self):
+        page = "Abstract. we show success rates ranging from 43% to 98%. " + self.FILL + " a drag-\nand-drop action. "
+        row = "- Drag-and-drop clickjacking %43-98 [U](https://a.example/p)\n"
+        kinds = self._kinds(self._run(row, self._pages(**{"https://a.example/p": page})))
+        self.assertNotIn(("uyarı", "terim-sayfada-yok"), kinds)
+
+    def test_kendi_urlsindeki_sayfada_sayi_yoksa_hata_urlsizde_uyari(self):
+        page = "Bu sayfada o sayı yok. " + self.FILL
+        own = self._run("- Maliyet $4500 olarak açıklandı [U](https://a.example/p)\n", self._pages(**{"https://a.example/p": page}))
+        self.assertEqual(self._kinds(own), [("uyarı", "sayı-yok")])
+        nourl = self._run("- Maliyet $4500 olarak açıklandı\n- kaynak [U](https://a.example/p)\n", self._pages(**{"https://a.example/p": page}))
+        self.assertEqual(self._kinds(nourl), [("uyarı", "sayı-yok")])
+        self.assertEqual(rapor_kontrol.summarize(own)["hata"], 0)       # sayı bulguları hata değil: birim/çeviri yanlış alarmı verir
+
+    def test_urlsiz_sayi_havuzda_destekli_ise_yalniz_bilgi(self):
+        page = "Official price: $4500 per unit for the Orbital Gateway module. " + self.FILL
+        res = self._run("- Orbital Gateway modül fiyatı $4500\n- kaynak [U](https://a.example/p)\n", self._pages(**{"https://a.example/p": page}))
+        self.assertEqual(self._kinds(res), [("bilgi", "kaynak-gösterilmemiş")])
+
+    def test_alinti_kendi_urlsinde_yoksa_hata_urlsiz_alintida_uyari(self):
+        page = "Tamamen başka bir metin burada duruyor ve alıntıyı içermiyor. " + self.FILL
+        q = "> \"the quick brown fox jumps over the lazy dog today\" — [S](https://a.example/p)\n"
+        self.assertEqual(self._kinds(self._run(q, self._pages(**{"https://a.example/p": page}))), [("hata", "alıntı-yok")])
+        good = page + " the quick brown fox jumps over the lazy dog today. "
+        self.assertEqual(self._kinds(self._run(q, self._pages(**{"https://a.example/p": good}))), [])
+
+    def test_okunamayan_sayfa_sessiz_kalir_ve_raporlanir(self):
+        res = self._run("- Maliyet $4500 [U](https://olu.example/p)\n", self._pages())
+        self.assertEqual(self._kinds(res), [])
+        self.assertEqual(res["okunamayan"], ["https://olu.example/p"])
+
+    def test_notlarda_olmayan_url_ve_zayif_kaynak(self):
+        page = "icerik " * 50
+        report = "- iddia [A](https://a.example/p) ve [B](https://medium.com/x)\n"
+        res = self._run(report, self._pages(**{"https://a.example/p": page, "https://medium.com/x": page}), notes_urls=["https://a.example/p/"])
+        kinds = sorted((f["seviye"], f["tur"]) for f in res["ekstra"])
+        self.assertIn(("uyarı", "notlarda-yok"), kinds)
+        self.assertIn(("bilgi", "zayıf-kaynak"), kinds)
+        self.assertNotIn("a.example", " ".join(f["mesaj"] for f in res["ekstra"] if f["tur"] == "notlarda-yok"))   # /p/ ile /p aynı sayılır
+
+    def test_ayni_gerekceli_sayilar_tek_satirda_birlesir(self):
+        merged = rapor_kontrol.merge_findings([rapor_kontrol._finding("uyarı", "sayı-yok", "sayı '2010' yok", "2010"),
+                                               rapor_kontrol._finding("uyarı", "sayı-yok", "sayı '2012' yok", "2012")])
+        self.assertEqual(len(merged), 1)
+        self.assertIn("'2010', '2012'", merged[0]["mesaj"])
+
+    def test_cli_siki_kipinde_cikis_kodu_ve_dosyalar(self):
+        with tempfile.TemporaryDirectory() as d:
+            rp = Path(d) / "rapor.md"
+            rp.write_text("- Maliyet $4500 [U](https://a.example/p)\n", encoding="utf-8")
+            page = {"ok": True, "markdown": "başka metin " * 40, "hata": ""}
+            with mock.patch.object(rapor_kontrol.oku, "load", return_value=page):
+                with mock.patch.object(sys, "argv", ["rapor_kontrol.py", str(rp)]):
+                    self.assertEqual(rapor_kontrol.main(), 0)                  # varsayılan: bulgu olsa da 0
+                with mock.patch.object(sys, "argv", ["rapor_kontrol.py", str(rp), "--siki"]):
+                    self.assertEqual(rapor_kontrol.main(), 1)
+            self.assertTrue((Path(d) / "rapor-kontrol.md").exists() and (Path(d) / "rapor-kontrol.json").exists())
+            with mock.patch.object(sys, "argv", ["rapor_kontrol.py", str(Path(d) / "yok.md")]):
+                self.assertEqual(rapor_kontrol.main(), 2)
 
 
 if __name__ == "__main__":

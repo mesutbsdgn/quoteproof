@@ -99,6 +99,7 @@ Her bulgu satırı **iddiayı**, **birebir bir alıntıyı**, **kendi URL'sini**
 | `oku.py` | Sayfa okuyucu: yalnız ana içerik, BM25 ile pasaj seçimi (tam sayfaya göre ≈20–40× az jeton), PDF ve GitHub README farkındalığı | 0 jeton |
 | `mcp_oku.py` | Okuyucuyu çalışanlara küçük bir MCP sunucusu olarak sunar | 0 jeton |
 | `guven.py` | 0–100 kaynak güvenilirlik buluşsalı | 0 jeton |
+| `rapor_kontrol.py` | **Nihai raporu** atıf yaptığı sayfalara karşı denetler: yanlış özneye yazılmış sayıları, birebir olmayan alıntıları, araştırma notlarında hiç geçmeyen atıfları yakalar | 0 jeton |
 | `rapor_olc.py` | İki raporu aynı ölçütle ölçer (sözcük, başlık, kaynak, boşluk) | 0 jeton |
 
 ## Özellikler, açıklamalı
@@ -107,6 +108,7 @@ Her bulgu satırı **iddiayı**, **birebir bir alıntıyı**, **kendi URL'sini**
 - **Örnek değil, her bulgu denetlenir.** Rapor kendi kapsamını da söyler (denenen / kanıtsız / atlanan); böylece boşluk gizlenemez.
 - **Sınır duyarlı eşleşme.** `1.2`, `11.20` içinde bulunmaz; `values[0]` ≠ `values0`; `v1.2.3`, `1.2.3` ile eşleşir; sayı biçimleri uzlaştırılır (`%26,2` ↔ `26.2%`, `100.000` ↔ `100,000`); alıntıdaki kasıtlı `...` ve editör eki `[the]` tolere edilir.
 - **Bağlam kontrolü.** Sayı taşıyan iddialarda, iddia cümlesindeki özgün bir terim sayfada doğrulanan alıntının yakınında geçmelidir; geçmiyorsa karar *Doğrulandı*'dan *Kısmen*'e düşer ve nedeni yazılır. Ucuz bir sezgidir (gerçek koşularda bulguların %1'inden çok daha azı), kanıt değildir.
+- **Rapor düzeyi kontrol.** Hatalar çoğu zaman *sentezde* doğar: not doğrudur, rapor sayıyı yanlış özneye yazar. `rapor_kontrol.py` bitmiş raporu öğe öğe (tablo satırı, madde, alıntı) atıf yaptığı sayfalara karşı yeniden denetler. Sezgiseldir: temiz çıktı raporun doğru olduğunu değil, bu hata sınıflarının görülmediğini söyler.
 - **Sürdürülebilir koşular.** `--devam`, bitmiş konuları yeniden kullanır (istem özeti eşleşmelidir). Her konudan sonra atomik bir kontrol noktası yazılır; öldürülen koşu hiçbir şey kaybetmez.
 - **Kapalı-varsayılan çalışanlar.** Araştırma yapmak yerine onay isteyen, 3'ten az benzersiz URL gösteren ya da hiç arama/okuma aracı çağırmayan çalışan reddedilir ve sıradaki arka uç devralır.
 - **Kaynak güven puanı** (*bir öncelik sinyalidir, asla kanıt değildir*). Alan adının sınıfından başlar, sonra URL sinyalleriyle ayarlanır:
@@ -261,7 +263,7 @@ Koşularımızda küçük bir konu çalışan başına yaklaşık 30 saniye sür
 ## Testler
 
 ```bash
-python3 arastir-ogren/scripts/test_arastir.py   # 124 test: ayrıştırma, sözleşme, devam, doğrulama, güven puanı, yapılandırma, MCP sunucusu
+python3 arastir-ogren/scripts/test_arastir.py   # 137 test: ayrıştırma, sözleşme, devam, doğrulama, güven puanı, yapılandırma, MCP sunucusu
 python3 arastir-ogren/scripts/test_oku.py       # 50 test: ayıklama, BM25, önbellek, SSRF, yönlendirme, robots.txt, PDF
 ```
 
@@ -274,7 +276,7 @@ arastir-ogren/            skill (~/.claude/skills/ altına kopyalayın ya da ba�
 ├── SKILL.md              koordinatör talimatları (Türkçe)
 ├── quoteproof.example.json   yapılandırma şablonu (~/.config/quoteproof/config.json olarak kopyalayın)
 ├── references/           çalışan istemi, rapor şablonu, tasarımın dayandığı notlar
-└── scripts/              arastir · denetle · dogrula · oku · mcp_oku · guven · rapor_olc · ayar  (+ testler)
+└── scripts/              arastir · denetle · dogrula · rapor_kontrol · oku · mcp_oku · guven · rapor_olc · ayar  (+ testler)
 assets/                   logo
 docs/fact-check/          bu README'nin doğrulaması (aşağıya bakın)
 ```

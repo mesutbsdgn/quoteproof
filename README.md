@@ -99,6 +99,7 @@ Each finding line carries **the claim**, **a verbatim quote**, **a URL of its ow
 | `oku.py` | The page reader: main content only, BM25 passage selection (≈20–40× fewer tokens than a full page), PDF and GitHub-README aware | 0 tokens |
 | `mcp_oku.py` | Exposes the reader to workers as a tiny MCP server | 0 tokens |
 | `guven.py` | 0–100 source credibility heuristic | 0 tokens |
+| `rapor_kontrol.py` | Checks the **final report** against the pages it cites: catches numbers pinned to the wrong subject, quotes that are not verbatim, citations that never appeared in the research notes | 0 tokens |
 | `rapor_olc.py` | Measures two reports with the same yardstick (words, headings, sources, gaps) | 0 tokens |
 
 ## Features, explained
@@ -107,6 +108,7 @@ Each finding line carries **the claim**, **a verbatim quote**, **a URL of its ow
 - **Every finding is checked — not a sample.** The report states its own coverage (tried / no evidence / skipped), so a gap can't hide.
 - **Boundary-aware matching.** `1.2` is not found inside `11.20`; `values[0]` is not `values0`; `v1.2.3` matches `1.2.3`; number formats are reconciled (`%26,2` ↔ `26.2%`, `100.000` ↔ `100,000`); deliberate `...` and editorial `[the]` inside a quote are tolerated.
 - **Context check.** For claims that carry a number, a distinctive term in the claim sentence must appear near the verified quote on the page; otherwise the verdict drops from *Verified* to *Partial* with the reason written down. A cheap heuristic (well under 1% of findings in real runs), not proof.
+- **Report-level check.** Errors are often born at *synthesis*: the note was right, the report pinned the number on the wrong subject. `rapor_kontrol.py` re-checks the finished report item by item (table rows, bullets, quotes) against the cited pages. It is a heuristic: a clean result means these error classes were not seen, not that the report is right.
 - **Resumable runs.** `--devam` re-uses topics that already finished (the prompt hash must match). A checkpoint is written atomically after every topic, so a killed run loses nothing.
 - **Fail-closed workers.** A worker that asks for approval instead of researching, cites fewer than 3 distinct URLs, or never called a search/read tool is rejected and the next back-end takes over.
 - **Source trust score** (*a priority signal, never proof*). Starts from the domain's class, then adjusts for URL signals:
@@ -261,7 +263,7 @@ In our runs, a small topic takes about 30 seconds per worker, and the audit + ve
 ## Tests
 
 ```bash
-python3 arastir-ogren/scripts/test_arastir.py   # 124 tests: parsing, contract, resume, verification, trust score, config, MCP server
+python3 arastir-ogren/scripts/test_arastir.py   # 137 tests: parsing, contract, resume, verification, trust score, config, MCP server
 python3 arastir-ogren/scripts/test_oku.py       # 50 tests: extraction, BM25, cache, SSRF, redirects, robots.txt, PDF
 ```
 
@@ -274,7 +276,7 @@ arastir-ogren/            the skill (copy or symlink into ~/.claude/skills/)
 ├── SKILL.md              coordinator instructions (Turkish)
 ├── quoteproof.example.json   configuration template (copy to ~/.config/quoteproof/config.json)
 ├── references/           worker prompt, report template, notes behind the design
-└── scripts/              arastir · denetle · dogrula · oku · mcp_oku · guven · rapor_olc · ayar  (+ tests)
+└── scripts/              arastir · denetle · dogrula · rapor_kontrol · oku · mcp_oku · guven · rapor_olc · ayar  (+ tests)
 assets/                   logo
 docs/fact-check/          the fact-check of this README (see below)
 ```

@@ -107,6 +107,53 @@ def _quote_span(base, quote):
     return (i, i + len(part)) if i >= 0 else None
 
 
+def anchor_positions(claim_text, base, quote_norm="", url=""):
+    """İddia cümlesindeki ÖZGÜN Latin terimler → normalize sayfa metnindeki konumları. Özgün: sayfada 1..CONTEXT_MAX_FREQ kez geçen; hariç: sık/dolgu sözcük,
+    alıntının kendi içindeki terim ve sayfa adresindeki sözcük (satıcı adı kendi sayfasında anchor olmaz)."""
+    host_labels = set(re.split(r"[^a-z0-9]+", urlparse(url).netloc.lower())) if url else set()
+    anchors = {}
+    for tok in ANCHOR_RE.findall(claim_prose(claim_text)):
+        t = norm(tok)
+        if t in anchors or t in ANCHOR_STOP or t in quote_norm or t in host_labels:
+            continue
+        if not (len(t) >= 5 or (tok.isupper() and len(tok) >= 3)):
+            continue
+        hits = [m.start() for m in re.finditer(r"(?<![\w-])" + re.escape(t) + r"(?![\w-])", base)]
+        if 1 <= len(hits) <= CONTEXT_MAX_FREQ:
+            anchors[t] = hits
+    return anchors
+
+
+def technical_terms(claim_text, quote_norm="", url=""):
+    """İddia cümlesindeki TEKNİK terimler (tireli: "drag-and-drop", "double-click"; harf+rakamlı: "FQ-44", "S4697"), normalize. Sayfada hiç yoksa güçlü bir ipucudur;
+    düz sözcükler/kısaltmalar kapsam dışı (çeviri/eş anlamlı yüzünden yanlış alarm verirdi)."""
+    host_labels = set(re.split(r"[^a-z0-9]+", urlparse(url).netloc.lower())) if url else set()
+    out = []
+    for tok in ANCHOR_RE.findall(claim_prose(claim_text)):
+        t = norm(tok)
+        technical = "-" in tok or (re.search(r"[A-Za-z]", tok) and re.search(r"\d", tok))
+        if technical and len(t) >= 6 and t not in out and t not in quote_norm and t not in host_labels and t not in ANCHOR_STOP:
+            out.append(t)
+    return out
+
+
+def term_on_page(base, term):
+    """Terim sayfada (tire-duyarsız: pdftotext 'drag-and-drop'u 'dragand-drop' yapabilir) geçiyor mu?"""
+    return term in base or term.replace("-", "") in base.replace("-", "")
+
+
+def anchor_distance(hits, targets):
+    """Terim konumlarından hedef aralığa/konumlara en kısa mesafe. targets: [(başlangıç, bitiş)]. Başlık bölgesindeki terim 0 sayılır."""
+    best = None
+    for h in hits:
+        if h < CONTEXT_TITLE_ZONE:
+            return 0
+        for lo, hi in targets:
+            d = 0 if lo <= h <= hi else min(abs(h - lo), abs(h - hi))
+            best = d if best is None else min(best, d)
+    return best
+
+
 def baglam_kontrol(finding_text, markdown, ev, url=""):
     """İddiadaki ÖZGÜN terim(ler) doğrulanan alıntıdan uzaktaysa uyarı sözlüğü, aksi halde None. 0 jeton, sezgisel.
 
@@ -122,18 +169,7 @@ def baglam_kontrol(finding_text, markdown, ev, url=""):
     span = next((sp for sp in (_quote_span(base, q) for q in ev["alinti"]) if sp), None)
     if not span:
         return None
-    quote_norm = " ".join(norm(q) for q in ev["alinti"])
-    host_labels = set(re.split(r"[^a-z0-9]+", urlparse(url).netloc.lower())) if url else set()   # "yandex" yandex.com sayfasında anchor olmaz
-    anchors = {}
-    for tok in ANCHOR_RE.findall(claim_prose(finding_text)):
-        t = norm(tok)
-        if t in anchors or t in ANCHOR_STOP or t in quote_norm or t in host_labels:
-            continue
-        if not (len(t) >= 5 or (tok.isupper() and len(tok) >= 3)):
-            continue
-        hits = [m.start() for m in re.finditer(r"(?<![\w-])" + re.escape(t) + r"(?![\w-])", base)]
-        if 1 <= len(hits) <= CONTEXT_MAX_FREQ:
-            anchors[t] = min(0 if (span[0] <= h <= span[1] or h < CONTEXT_TITLE_ZONE) else min(abs(h - span[0]), abs(h - span[1])) for h in hits)
+    anchors = {t: anchor_distance(h, [span]) for t, h in anchor_positions(finding_text, base, " ".join(norm(q) for q in ev["alinti"]), url).items()}
     if anchors and all(d > CONTEXT_WINDOW for d in anchors.values()):
         return {"terimler": anchors, "pencere": CONTEXT_WINDOW}
     return None
@@ -160,6 +196,8 @@ def evidence(finding_text):
         token = norm(m.group(0))
         token = token[1:] if re.match(r"v\d", token) else token
         token = token.replace(" ", "")
+        if re.fullmatch(r"(?:19|20)\d{2}-(?:\d{1,2}|(?:19|20)\d{2})", token):
+            continue   # yıl-ay ("2026-06") ve yıl aralığı ("2024-2026") tarih ETİKETİDİR: sayfa "June 2026" yazar, birebir aranırsa hep "yok" çıkar
         if token and token not in GENERIC_NUMS and token not in nums:
             nums.append(token)
     return {"alinti": quotes[:3], "kod": [c for c in codes if c not in quotes and not any(c in q for q in quotes)][:4], "sayi": nums[:5]}
@@ -195,12 +233,18 @@ def has_token(page_norm, token, kind):
     # sayı: sayfada "8-10x" ya da "8-10 x" yazılabilir; önü/arkası rakam-harf-nokta-virgülle bitişik olmasın
     # 8 Eki 2026: Türkçe not ("%26,2", "1,37", "100.000") ile İngilizce kaynak ("26.2%", "1.37 billion", "100,000") yazım farkı yüzünden
     # doğru rakamlar "bulunamadı" sayılıyordu → ondalık/binlik ayırıcı ve yüzde yazımı varyantları denenir.
+    return bool(number_positions(page_norm, t))
+
+
+def number_positions(page_norm, token):
+    """Sayının (yazım varyantlarıyla) normalize sayfa metnindeki BAŞLANGIÇ konumları (sıralı). Sınır kuralları has_token ile aynıdır."""
+    t = norm(token)
+    out = set()
     for variant in number_variants(t):
         lead = r"v?" if re.match(r"\d+\.\d", variant) else ""   # sürüm: iddia "1.2.3", sayfa "v1.2.3" yazabilir
         pattern = r"(?<![\w.,-])" + lead + r"\s?".join(re.escape(ch) for ch in variant) + r"(?!\w)(?![.,]\d)"
-        if re.search(pattern, page_norm):
-            return True
-    return False
+        out.update(m.start() for m in re.finditer(pattern, page_norm))
+    return sorted(out)
 
 
 def number_variants(t):
