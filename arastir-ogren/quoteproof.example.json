@@ -1,0 +1,19 @@
+{
+  "_comment": "Bu dosyayı ~/.config/quoteproof/config.json olarak kopyalayıp doldurun (ya da QUOTEPROOF_CONFIG ile yol verin). Anahtar DEĞERİNİ buraya yazmayın. cli_backend.format: \"responses-json\" (output[] içeren JSON) ya da \"text\" (standart çıktının tamamı nottur). cli_backend.prompt_via: \"arg\" (komutta {prompt}) ya da \"stdin\" (istem standart girdiden; komutta {prompt} olmamalı).",
+
+  "models": {
+    "fast":   { "opencode": "PROVIDER/FAST-MODEL-ID",   "cli": "FAST-MODEL-ID" },
+    "strong": { "opencode": "PROVIDER/STRONG-MODEL-ID", "cli": "STRONG-MODEL-ID" }
+  },
+  "default_model": "fast",
+
+  "api_key_env": "LLM_API_KEY",
+  "key_files": ["~/.config/llm-keys.env"],
+
+  "runtime_env": {},
+
+  "cli_backend": {
+    "command": ["my-llm-cli", "chat", "--model", "{model}", "--message", "{prompt}", "--output", "json", "--timeout", "{timeout}"],
+    "format": "responses-json"
+  }
+}

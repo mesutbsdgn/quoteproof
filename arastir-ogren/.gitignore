@@ -1,0 +1,6 @@
+*.pyc
+.DS_Store
+.oc-calisma/
+__pycache__/
+arastirma/
+quoteproof.json

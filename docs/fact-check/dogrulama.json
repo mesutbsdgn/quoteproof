@@ -1,0 +1,129 @@
+{
+  "kapsam": {
+    "toplam_bulgu": 9,
+    "url_li": 9,
+    "denenen": 9,
+    "kanitsiz": 0,
+    "limit_disi": 0,
+    "urlsiz": 0
+  },
+  "satirlar": [
+    {
+      "not": "readme-fact-check.md",
+      "iddia": "uv advertises a 10-100x speed claim (README: example verification table) — \"10-100x faster than pip\" — [uv README](https://github.com/astral-sh/uv) (2026-10, birincil)",
+      "karar": "Doğrulandı",
+      "bulunan": 2,
+      "toplam": 2,
+      "eksik": [],
+      "neden": "",
+      "url": "https://github.com/astral-sh/uv",
+      "enjeksiyon_izi": false,
+      "guven": 65,
+      "guven_sinif": "kod deposu"
+    },
+    {
+      "not": "readme-fact-check.md",
+      "iddia": "robots.txt unreachable => complete disallow (README: fail-closed on 5xx / network errors) — \"If the robots.txt file is unreachable due to server or network errors, this means the robots.txt file is undefined and the crawler MUST assume complete disallow.\" — [RFC 9309 §2.3.1.4](https://www.rfc-editor.org/rfc/rfc9309.html) (2022-09, birincil)",
+      "karar": "Doğrulandı",
+      "bulunan": 1,
+      "toplam": 1,
+      "eksik": [],
+      "neden": "",
+      "url": "https://www.rfc-editor.org/rfc/rfc9309.html",
+      "enjeksiyon_izi": false,
+      "guven": 90,
+      "guven_sinif": "resmî/standart"
+    },
+    {
+      "not": "readme-fact-check.md",
+      "iddia": "robots.txt 4xx => allowed (README: 4xx means allowed) — \"If a server status code indicates that the robots.txt file is unavailable to the crawler, then the crawler MAY access any resources on the server.\" — [RFC 9309 §2.3.1.3](https://www.rfc-editor.org/rfc/rfc9309.html) (2022-09, birincil)",
+      "karar": "Doğrulandı",
+      "bulunan": 1,
+      "toplam": 1,
+      "eksik": [],
+      "neden": "",
+      "url": "https://www.rfc-editor.org/rfc/rfc9309.html",
+      "enjeksiyon_izi": false,
+      "guven": 90,
+      "guven_sinif": "resmî/standart"
+    },
+    {
+      "not": "readme-fact-check.md",
+      "iddia": "longest match wins (README: most specific rule wins) — \"The most specific match found MUST be used. The most specific match is the match that has the most octets.\" — [RFC 9309 §2.2.2](https://www.rfc-editor.org/rfc/rfc9309.html) (2022-09, birincil)",
+      "karar": "Doğrulandı",
+      "bulunan": 1,
+      "toplam": 1,
+      "eksik": [],
+      "neden": "",
+      "url": "https://www.rfc-editor.org/rfc/rfc9309.html",
+      "enjeksiyon_izi": false,
+      "guven": 90,
+      "guven_sinif": "resmî/standart"
+    },
+    {
+      "not": "readme-fact-check.md",
+      "iddia": "path matching starts at the first octet (README: prefix matching) — \"The matching MUST start with the first octet of the path.\" — [RFC 9309 §2.2.2](https://www.rfc-editor.org/rfc/rfc9309.html) (2022-09, birincil)",
+      "karar": "Doğrulandı",
+      "bulunan": 1,
+      "toplam": 1,
+      "eksik": [],
+      "neden": "",
+      "url": "https://www.rfc-editor.org/rfc/rfc9309.html",
+      "enjeksiyon_izi": false,
+      "guven": 90,
+      "guven_sinif": "resmî/standart"
+    },
+    {
+      "not": "readme-fact-check.md",
+      "iddia": "the shared (carrier-grade NAT) address range is blocked by the reader (README: CGNAT) — \"The Shared Address Space address range is 100.64.0.0/10.\" — [RFC 6598](https://www.rfc-editor.org/rfc/rfc6598.html) (2012-04, birincil)",
+      "karar": "Doğrulandı",
+      "bulunan": 1,
+      "toplam": 1,
+      "eksik": [],
+      "neden": "",
+      "url": "https://www.rfc-editor.org/rfc/rfc6598.html",
+      "enjeksiyon_izi": false,
+      "guven": 90,
+      "guven_sinif": "resmî/standart"
+    },
+    {
+      "not": "readme-fact-check.md",
+      "iddia": "BM25 is a ranking function (README: BM25 passage selection) — \"In information retrieval, Okapi BM25 (BM is an abbreviation of best matching) is a ranking function used by search engines to estimate the relevance of documents to a given search query.\" — [Okapi BM25 — Wikipedia](https://en.wikipedia.org/wiki/Okapi_BM25) (2026-10, ikincil)",
+      "karar": "Doğrulandı",
+      "bulunan": 1,
+      "toplam": 1,
+      "eksik": [],
+      "neden": "",
+      "url": "https://en.wikipedia.org/wiki/Okapi_BM25",
+      "enjeksiyon_izi": false,
+      "guven": 60,
+      "guven_sinif": "ansiklopedi"
+    },
+    {
+      "not": "readme-fact-check.md",
+      "iddia": "DNS rebinding is an attack technique (README: connection pinning prevents it) — \"DNS rebinding is a method of manipulating resolution of domain names that is commonly used as a form of computer attack.\" — [DNS rebinding — Wikipedia](https://en.wikipedia.org/wiki/DNS_rebinding) (2026-10, ikincil)",
+      "karar": "Doğrulandı",
+      "bulunan": 1,
+      "toplam": 1,
+      "eksik": [],
+      "neden": "",
+      "url": "https://en.wikipedia.org/wiki/DNS_rebinding",
+      "enjeksiyon_izi": false,
+      "guven": 60,
+      "guven_sinif": "ansiklopedi"
+    },
+    {
+      "not": "readme-fact-check.md",
+      "iddia": "llms.txt is a proposal for agent-readable site indexes (README: llms.txt support) — \"A proposal to standardise on using an `/llms.txt` file to provide information to help agents use a website.\" — [llmstxt.org](https://llmstxt.org/) (2026-09, birincil)",
+      "karar": "Doğrulandı",
+      "bulunan": 1,
+      "toplam": 1,
+      "eksik": [],
+      "neden": "",
+      "url": "https://llmstxt.org/",
+      "enjeksiyon_izi": false,
+      "guven": 50,
+      "guven_sinif": "belirsiz"
+    }
+  ]
+}
