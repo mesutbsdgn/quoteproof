@@ -19,7 +19,7 @@
 
 ## In 30 seconds
 
-AI research agents are fluent, fast — and they **invent quotes**. The usual fix is to ask a second LLM to fact-check the first, which is slow, costs tokens, and tends to fail in the same ways.
+AI research agents write fluently and fast, but they **invent quotes**. The usual fix is to ask a second LLM to fact-check the first. That is slow, costs tokens, and tends to fail in the same ways.
 
 Quoteproof makes the claim itself checkable. Every finding a worker writes must be a **word-for-word quote in the page's original language, plus a URL**. A script with **zero LLM tokens** then opens each cited page and looks for that exact text.
 
@@ -31,7 +31,7 @@ What a worker wrote (illustrative)                       What Quoteproof says
 "a paraphrase nobody can locate"    — blog.example.com    ✗ Not found  paraphrases cannot be verified
 ```
 
-Only what survives that check goes to the coordinating model for final review and the written report.
+Only findings that survive this check go to the coordinating model for final review and the written report.
 
 > **Measured on the author's own runs:** requiring verbatim quotes raised the share of findings that could be auto-verified from **3 of 14 to about 14 of 15**. A later round of checker fixes took one real run from **7 of 21 to 19 of 21** verified; the remainder were legitimate paraphrases correctly flagged for a human look.
 
@@ -39,13 +39,13 @@ Only what survives that check goes to the coordinating model for final review an
 
 | | Step | Who does it | Cost |
 |---|---|---|---|
-| 1 | **Plan** — split the question into topics | the coordinating model | one call |
-| 2 | **Research** — search, read, write notes in a fixed format | cheap workers, in parallel | cheap |
-| 3 | **Audit** — format, dead links, repo activity, source trust | Python | 0 tokens |
-| 4 | **Verify** — is every quote / number / version really on the page? | Python | 0 tokens |
-| 5 | **Review & write** — spot-check meaning, write the report | the coordinating model | a few calls |
+| 1 | **Plan**: split the question into topics | the coordinating model | one call |
+| 2 | **Research**: search, read, write notes in a fixed format | cheap workers, in parallel | cheap |
+| 3 | **Audit**: format, dead links, repo activity, source trust | Python | 0 tokens |
+| 4 | **Verify**: is every quote, number and version really on the page? | Python | 0 tokens |
+| 5 | **Review & write**: spot-check meaning, write the report | the coordinating model | a few calls |
 
-The single rule that made the difference: **quote verbatim, in the original language — or don't quote.** A translated "quote" can never be found on the page, so it can never pass.
+The single rule that made the difference: **quote verbatim, in the original language, or don't quote.** A translated "quote" can never be found on the page, so it can never pass.
 
 ## How it works
 
@@ -134,17 +134,17 @@ Web pages are hostile input. The design assumes a worker *will* be handed instru
 
 | Threat | What the design does |
 |---|---|
-| A page tells the worker to "ignore previous instructions" | Workers get a **deny-by-default tool allow-list**: search and read only. A hijacked worker cannot run commands, read local files or call other services. Fetched text is labelled *data, not instructions*, and common injection phrases are flagged. |
+| A page tells the worker to "ignore previous instructions" | OpenCode workers get a **deny-by-default tool allow-list**: search and read only. A hijacked worker cannot run commands, read local files or call other services. Fetched text is labelled *data, not instructions*, and common injection phrases are flagged. |
 | The reader is steered at an internal address (SSRF) | Only `http(s)`, only globally-routable addresses. Loopback, private, link-local, carrier-grade NAT and IPv4-mapped IPv6 ranges are blocked. |
 | DNS rebinding | DNS is resolved once and the connection is **pinned to the validated IP** (Host/SNI preserved). |
 | A redirect that lands somewhere internal | Every redirect hop is re-validated and re-checked against robots.txt. No proxy is used. |
 | Huge or deliberately slow responses | Size caps (2 MB; PDF 10 MB) and a **total** deadline covering DNS, redirects and body. |
 | Impolite crawling | robots.txt (RFC 9309) on every content request, a per-host rate limit, `Crawl-delay`. Workers cannot switch it off. |
 | A hostile robots.txt file | The matcher is regex-free (no ReDoS) with caps on rule count, pattern length and file size. |
-| Secrets in logs or child processes | Child processes get an environment allow-list; keys are redacted from error text. |
+| Secrets in logs or child processes | OpenCode and MCP child processes get only allow-listed environment variables (plus the configured key); some key-like values in error text are masked. The scope is narrow, see [Limitations](#limitations). |
 | A poisoned cache | Atomic, schema-validated cache keyed by URL and fetch mode; 6-hour TTL. |
 
-The code has been through two independent LLM-assisted security reviews. Every finding they raised was reproduced offline before it was fixed, and each fix has a regression test.
+The code has been through two independent LLM-assisted security reviews. Every finding they raised was reproduced offline before it was fixed, and each fix has a regression test. This table applies to the OpenCode workers and the reader; the limits of a custom CLI back-end are described under [Limitations](#limitations).
 
 ## Getting started
 
@@ -152,7 +152,7 @@ The code has been through two independent LLM-assisted security reviews. Every f
 
 - **Python 3.9 or newer.** No third-party packages.
 - **To run the research workers:** a command-line agent runtime with a web-search tool, and an LLM account of your choice. The worker back-end is configured in one small JSON file (models, key location, optional command-line back-end) — nothing provider-specific is hard-coded.
-- *Optional:* `gh` (GitHub repository checks) and `pdftotext` (PDF pages).
+- *Optional:* `gh` (GitHub repository checks; `gh` handles its own authentication) and `pdftotext` (PDF pages).
 
 The reader, auditor, verifier and trust scorer need **no model, no account and no key** — they are useful on their own.
 
@@ -174,7 +174,14 @@ cp quoteproof/arastir-ogren/quoteproof.example.json ~/.config/quoteproof/config.
 python3 ~/.claude/skills/arastir-ogren/scripts/ayar.py                                   # prints the status (never the key itself)
 ```
 
-The file names your models, the *name* of the environment variable that holds your key (and optional key files), and — optionally — a command-line back-end template (the command may print JSON or just plain text; with `"format": "text"` its whole output is the note, so almost any agent CLI can act as a worker; with `"prompt_via": "stdin"` the prompt is piped to its standard input instead of the command line — handy for CLIs that read stdin and for very long prompts). It is read from `QUOTEPROOF_CONFIG`, `./quoteproof.json` or `~/.config/quoteproof/config.json`, and is git-ignored.
+The worker key is passed to OpenCode; GitHub authentication is handled by `gh` (Quoteproof does not hold a GitHub token).
+
+The file names your models, the *name* of the environment variable that holds your key (and optional key files), and, optionally, a command-line back-end template.
+
+- The command may print JSON or plain text. With `"format": "text"` its whole output is the note, so almost any agent CLI can act as a worker.
+- With `"prompt_via": "stdin"` the prompt is piped to the command's standard input instead of the command line, which suits CLIs that read stdin and very long prompts.
+- The configured key is not passed to a custom CLI. The CLI receives only allow-listed environment variables and must use its own session or configuration. Its security limits are listed under [Limitations](#limitations).
+- The file is looked up in `QUOTEPROOF_CONFIG`, then `quoteproof.json` in the skill folder, then `~/.config/quoteproof/config.json`. It is git-ignored.
 
 ### Run a research
 
@@ -256,8 +263,11 @@ In our runs, a small topic takes about 30 seconds per worker, and the audit + ve
 - Verification is **textual**, not semantic: a quote can be on the page and still be misread. Check meaning on the claims that matter.
 - Trust scoring is a hand-written heuristic over domains and URL shapes; it will mis-rank unusual sites. Treat it as a triage hint.
 - Workers need an agent runtime that is already set up with your LLM provider; this project only tells it which model ids and key variable to use. A different runtime needs a new back-end function in `scripts/arastir.py`.
+- **The safety boundary does not cover a custom CLI back-end.** The deny-by-default tool permissions exist only for OpenCode. A custom CLI runs with an allow-listed environment and does not receive the `api_key_env` key; filtering environment variables does not restrict its file-system or network access. Run a CLI you do not trust in your own isolation (container, separate user).
+- **Secret masking is limited.** A simple pattern masks only some key-like values in error text. Worker output, including the custom-CLI path, is written to the note file as is; there is no general sanitising guarantee. `denetle.py` runs the `gh` subprocess with the parent process's environment.
 - JavaScript-only pages cannot be read without a browser. A third-party reader option exists (`--jina`) but it sends the URL to a third party, so it is opt-in and never used by workers.
 - Worker prompts, notes and reports are Turkish by default (quotes stay in the source language).
+- The reader uses no proxy and resolves DNS itself. In an environment where traffic can leave only through a proxy, online reading and quote verification do not work; the offline unit tests are unaffected.
 - The test suites are offline unit tests; the live pipeline has been exercised end-to-end by hand, not in CI.
 
 ## Tests
@@ -280,6 +290,40 @@ arastir-ogren/            the skill (copy or symlink into ~/.claude/skills/)
 assets/                   logo
 docs/fact-check/          the fact-check of this README (see below)
 ```
+
+## Release notes
+
+There is no tagged release yet; entries are listed newest first, by commit. Measurements are detailed in the [closed issues](https://github.com/mesutbsdgn/quoteproof/issues?q=is%3Aissue+is%3Aclosed).
+
+### Unreleased (documentation)
+
+- README rewritten; the Turkish text was simplified.
+- Safety wording narrowed: deny-by-default tool permissions and environment filtering apply to OpenCode workers only, and a custom CLI back-end is outside that boundary. Secret masking covers only some key-like values in error text.
+- Config lookup path corrected (`quoteproof.json` in the skill folder, not `./quoteproof.json`).
+- Added to Limitations: the reader uses no proxy, so it does not work where traffic can only leave through a proxy.
+
+### Report-level source check ([`c88db28`](https://github.com/mesutbsdgn/quoteproof/commit/c88db28), [#4](https://github.com/mesutbsdgn/quoteproof/issues/4))
+
+- New `rapor_kontrol.py` checks a finished report item by item against the pages it cites. Reason: in a real case the note was correct, but the report table pinned a 43–98% range on a single attack variant. Every note passed verification, so the error was visible only at report level.
+- On a real 238-item report the first version raised 129 errors (almost all from a date column read as a number range). After calibration 6 errors remained, with no false context alarms among the findings. The rebuilt case is flagged correctly.
+- `--siki` exits with code 1 on any finding, so it can gate the synthesis step.
+- Limits: heuristic; a clean result does not prove the report is right. Unreadable pages cannot be checked and are listed separately. The only confirmed true positive on a real report is the rebuilt case.
+- Tests: 137 + 50.
+
+### Context check and security-source trust classes ([`5711d99`](https://github.com/mesutbsdgn/quoteproof/commit/5711d99), [#2](https://github.com/mesutbsdgn/quoteproof/issues/2), [#3](https://github.com/mesutbsdgn/quoteproof/issues/3))
+
+- **Context check** (`dogrula.baglam_kontrol`): when a distinctive term of a numeric claim is far from the verified quote, the verdict is *Partial* instead of *Verified*. On three real runs it flagged 0, 0 and 3 of about 395 verified items (under 1%). **No confirmed true positive was found in real data**; behaviour is pinned by a synthetic test that rebuilds the motivating case.
+- **Security sources**: OWASP, MITRE, USENIX, PortSwigger and similar are no longer "unknown 50". New classes: security standard/guide 88, academic security venue 85, official documentation 80, industry press 68. On one real security run, 154 of 156 findings are no longer "unknown" (average score 82.2). Look-alike domains such as `owasp.org.evil.example` stay unclassified.
+
+### First release ([`60bd605`](https://github.com/mesutbsdgn/quoteproof/commit/60bd605), [#1](https://github.com/mesutbsdgn/quoteproof/issues/1), [#5](https://github.com/mesutbsdgn/quoteproof/issues/5))
+
+- Verbatim-quote contract, `denetle.py`, `dogrula.py`, `oku.py`, `guven.py` and the parallel worker pipeline.
+- Provider-neutral configuration: models, key location and an optional command-line back-end live in a config file. The back-end can print JSON or plain text (`"format": "text"`) and take the prompt as an argument or on stdin (`"prompt_via": "stdin"`).
+- PDF verification: reading-order extraction, matching tolerant of line-end hyphenation and table separators. On one real run *Verified* rose from 141 to 148 and *Not found* fell from 8 to 2; the remaining two were a genuine paraphrase and a truncated quote.
+- Hardened reader: SSRF protection with IP pinning, robots.txt (RFC 9309), rate limits.
+- Source trust score and flags, resumable runs, fail-closed worker contract.
+- English and Turkish READMEs and a fact-check of the README's external claims.
+- Tests: 115 + 50.
 
 ## License
 
