@@ -271,11 +271,12 @@ In the author's runs, a small topic takes about 30 seconds per worker, and the a
 - Worker prompts, notes and reports are Turkish by default (quotes stay in the source language).
 - The reader uses no proxy and resolves DNS itself. In an environment where traffic can leave only through a proxy, online reading and quote verification do not work; the offline unit tests are unaffected.
 - The test suites are offline unit tests; the live pipeline has been exercised end-to-end by hand, not in CI.
+- **Reliability of live research is not established.** In the first independent trial (another machine, 9 October 2026, a different model, low effort), both live tasks that finished produced notes that failed the output contract and were moved to `hatali/`, and the command-line fallback exited with a code that gave no usable diagnosis. The offline checks passed. Diagnostics were improved afterwards (see the release notes); the root cause of the contract failures was not isolated. Treat the research workers as experimental and start with one small topic.
 
 ## Tests
 
 ```bash
-python3 arastir-ogren/scripts/test_arastir.py   # 137 tests: parsing, contract, resume, verification, trust score, config, MCP server
+python3 arastir-ogren/scripts/test_arastir.py   # 145 tests: parsing, contract, resume, verification, trust score, config, MCP server
 python3 arastir-ogren/scripts/test_oku.py       # 50 tests: extraction, BM25, cache, SSRF, redirects, robots.txt, PDF
 ```
 
@@ -304,6 +305,8 @@ There is no tagged release yet; entries are listed newest first, by commit. Meas
 - Safety wording narrowed: deny-by-default tool permissions and environment filtering apply to OpenCode workers only, and a custom CLI back-end is outside that boundary. Secret masking covers only some key-like values in error text.
 - Config lookup path corrected (`quoteproof.json` in the skill folder, not `./quoteproof.json`).
 - Added to Limitations: the reader uses no proxy, so it does not work where traffic can only leave through a proxy.
+- Added to Limitations: an honest account of the first independent live trial (both finished tasks failed the output contract).
+- Better failure diagnostics in `arastir.py`: a command-line back-end failure now reports the command, the exit code and the last meaningful output lines instead of a lone `}`; rate-limit (429) and step-budget exhaustion are reported as separate reasons; every attempt in `calisma.json` records its own token use and tool counts. Tests: 145 + 50.
 
 ### Report-level source check ([`c88db28`](https://github.com/mesutbsdgn/quoteproof/commit/c88db28), [#4](https://github.com/mesutbsdgn/quoteproof/issues/4))
 

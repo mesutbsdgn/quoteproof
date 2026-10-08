@@ -271,11 +271,12 @@ Yazarın denemelerinde küçük bir konu, alt ajan başına yaklaşık 30 saniye
 - Okuyucu proxy kullanmaz ve DNS'i kendisi çözer. Yalnızca proxy üzerinden dışarı çıkılabilen ortamlarda çevrimiçi okuma ve alıntı doğrulama çalışmaz; çevrimdışı birim testleri etkilenmez.
 - Alt ajan istemleri, notlar ve raporlar varsayılan olarak Türkçedir (alıntılar kaynağın dilinde kalır).
 - Test setleri çevrimdışı birim testleridir; canlı hat uçtan uca elle denendi, CI'da çalışmaz.
+- **Canlı araştırmanın güvenilirliği kanıtlanmış değil.** İlk bağımsız denemede (başka bir makine, 9 Ekim 2026, farklı bir model, düşük efor) biten iki canlı görev de çıktı sözleşmesini geçemedi ve notları `hatali/` klasörüne taşındı. Komut satırı yedeği de işe yarar bir teşhis vermeyen bir çıkış koduyla bitti. Çevrimdışı kontroller geçti. Teşhis sonradan iyileştirildi (bkz. sürüm notları); sözleşme hatalarının kök nedeni ayrıştırılamadı. Araştırma alt ajanlarını deneysel sayın ve küçük bir konuyla başlayın.
 
 ## Testler
 
 ```bash
-python3 arastir-ogren/scripts/test_arastir.py   # 137 test: ayrıştırma, sözleşme, devam, doğrulama, güven puanı, yapılandırma, MCP sunucusu
+python3 arastir-ogren/scripts/test_arastir.py   # 145 test: ayrıştırma, sözleşme, devam, doğrulama, güven puanı, yapılandırma, MCP sunucusu
 python3 arastir-ogren/scripts/test_oku.py       # 50 test: ayıklama, BM25, önbellek, SSRF, yönlendirme, robots.txt, PDF
 ```
 
@@ -304,6 +305,8 @@ Depoda henüz etiketli sürüm yok; kayıtlar en yeniden en eskiye, commit sıra
 - Güvenlik anlatımı daraltıldı: varsayılanı yasak olan araç izinleri ve ortam süzme yalnızca OpenCode alt ajanları için geçerlidir, özel CLI arka ucu kapsam dışıdır. Gizli bilgi maskeleme yalnızca hata metinlerindeki bazı anahtar benzeri değerleri kapsar.
 - Yapılandırma dosyasının arama yolu düzeltildi (`./quoteproof.json` yerine skill klasöründeki `quoteproof.json`).
 - Okuyucunun proxy kullanmadığı, bu yüzden yalnızca proxy ile dışarı çıkılan ortamlarda çalışmadığı Sınırlar bölümüne eklendi.
+- Sınırlar bölümüne ilk bağımsız canlı denemenin dürüst bir özeti eklendi (biten iki görevin ikisi de çıktı sözleşmesini geçemedi).
+- `arastir.py` hata teşhisi iyileşti. Komut satırı arka ucu başarısız olunca artık tek başına `}` yerine komutu, çıkış kodunu ve son anlamlı çıktı satırlarını bildirir. Hız sınırı (429) ile adım bütçesinin bitmesi ayrı nedenler olarak yazılır. `calisma.json` her denemenin kendi jeton ve araç sayısını kaydeder. Testler: 145 + 50.
 
 ### Rapor düzeyinde kaynak kontrolü ([`c88db28`](https://github.com/mesutbsdgn/quoteproof/commit/c88db28), [#4](https://github.com/mesutbsdgn/quoteproof/issues/4))
 

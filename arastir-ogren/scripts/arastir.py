@@ -49,7 +49,21 @@ URL_RE = re.compile(r"https?://[^\s)>\]\"']+")
 PLAN_RE = re.compile(r"(?i)plan modu|onay(?:ına|ınıza|ınızı|ınız)\s+(?:sun|bekle)|yaklaşımı onay|onaylarsanız|onay vermenizi|awaiting (?:your )?approval")
 # 8 Eki 2026: arama sağlayıcısı oturum boyunca 429 verdi; çalışan "Araştırma tamamlanamadı, arama altyapısı çöktü" yazıp 3 denemede aynı duvara çarptı.
 # Böyle notta (hız sınırı ya da adım bütçesi bitti) aynı arka ucu yeniden denemek boşuna: sıradaki FARKLI arka uca geçilir (rc=10).
-RATE_RE = re.compile(r"(?i)\b429\b|rate.?limit|hız sınırı|maximum number of steps|adım sınırı|arama altyapısı çöktü|arama sağlayıcısı çöktü")
+RATE_RE = re.compile(r"(?i)\b429\b|rate.?limit|hız sınırı|arama altyapısı çöktü|arama sağlayıcısı çöktü")
+STEP_RE = re.compile(r"(?i)maximum number of steps|adım sınırı|step limit|max.?steps")
+
+
+def sinir_nedeni(text):
+    """Notta hız sınırı ve/veya adım bütçesi izi varsa kısa neden (yoksa None). İkisi ayrı raporlanır: çözümleri farklıdır
+    (hız sınırı → sağlayıcı/arama; adım bütçesi → efor ya da konu daraltma)."""
+    rate, step = bool(RATE_RE.search(text)), bool(STEP_RE.search(text))
+    if rate and step:
+        return "arama hız sınırı (429) ve adım bütçesi bitti"
+    if rate:
+        return "arama hız sınırı (429)"
+    if step:
+        return "adım bütçesi bitti (OpenCode adım sınırı)"
+    return None
 BROAD_TOPIC_ENTITIES = 6   # bir konuda bu kadar ya da daha çok varlık (ülke/ürün/şirket) sayılıyorsa uyar: 24 adımlık bütçeye sığmaz
 MIN_URLS = 3        # bunun altı: kaynaklı bulgu yok → çıktı sözleşmesi bozuk (rc=9, zincir sürer)
 WEAK_URLS = 8       # bunun altı kabul edilir ama "zayıf" işaretlenir (çıkış kodu 73; örn. arama 429'a düştü)
@@ -216,12 +230,24 @@ def parse_opencode_events(stdout):
         final, done = "\n".join(steps[max(stop_steps)]).strip(), True
     else:           # "stop" ile biten adım yok → kesilmiş ya da tanınmayan akış: ara düşünce metni nihai cevap SAYILMAZ (kapalı-varsayılan)
         final, done = "", False
-    return {"metin": final, "araclar": tools, "hatalar": errors, "jeton": tokens, "tamam": done}
+    return {"metin": final, "araclar": tools, "hatalar": errors, "jeton": tokens, "tamam": done,
+            "son_neden": reasons[max(reasons)] if reasons else None}
 
 
 def redact(text):
     """Hata/günlük metninden anahtar benzeri değerleri siler (sonuç dosyasına ve ekrana sızmasın)."""
     return SECRET_RE.sub(lambda m: m.group(1) + m.group(2) + "[GİZLİ]", text or "")
+
+
+def hata_ozeti(err, out="", rc=None, ad="", sinir=200):
+    """Başarısız bir alt sürecin okunur özeti. Yalnız son satıra bakmak yanıltıcıydı (JSON hata çıktısında son satır "}" olabiliyor):
+    harf/rakam içeren son 3 satır alınır, stderr boşsa stdout'a bakılır; komut adı ve çıkış kodu başa yazılır. Anahtar benzeri değerler maskelenir."""
+    def anlamli(metin):
+        return [l.strip() for l in (metin or "").splitlines() if sum(c.isalnum() for c in l) >= 3]
+    satirlar = anlamli(err)[-3:] or anlamli(out)[-3:]
+    govde = " | ".join(satirlar) if satirlar else "çıktı yok (komut sessiz bitti)"
+    ozet = redact(f"{ad + ' ' if ad else ''}rc={rc}: {govde}")
+    return ozet if len(ozet) <= sinir else "…" + ozet[-(sinir - 1):]
 
 
 def check_contract(text, minimum=MIN_NOTE_BYTES):
@@ -334,10 +360,10 @@ def work_opencode(prompt_text, note, base, model_key, effort, timeout, search, r
     if timed_out:
         return {"rc": 6, "hata": "OpenCode zaman aşımı", "jeton": parsed["jeton"], "araclar": parsed["araclar"]}
     if rc != 0 or parsed["hatalar"]:
-        why = (parsed["hatalar"] or [err.strip().splitlines()[-1] if err.strip() else "bilinmeyen hata"])[0]
+        why = parsed["hatalar"][0] if parsed["hatalar"] else hata_ozeti(err, out, rc or 3, "opencode")
         return {"rc": rc or 3, "hata": redact(why)[:200], "jeton": parsed["jeton"], "araclar": parsed["araclar"]}
     if not parsed["tamam"]:
-        return {"rc": 7, "hata": "akış nihai cevap (reason=stop) olmadan bitti (adım sınırı/kesinti)", "jeton": parsed["jeton"],
+        return {"rc": 7, "hata": f"akış nihai cevap (reason=stop) olmadan bitti (adım sınırı/kesinti; son adım nedeni: {parsed['son_neden'] or 'yok'})", "jeton": parsed["jeton"],
                 "araclar": parsed["araclar"]}
     note.write_text(parsed["metin"] + "\n", encoding="utf-8")
     return {"rc": 0, "jeton": parsed["jeton"], "araclar": parsed["araclar"]}
@@ -357,7 +383,8 @@ def work_cli(prompt_text, note, model_key, timeout):
     text_mode = ayar.cli_format() == "text"
     parsed = parse_text_output(out) if text_mode else parse_responses_json(out)
     if rc != 0 or not parsed["metin"]:
-        return {"rc": rc or 3, "hata": redact(err.strip().splitlines()[-1] if err.strip() else "boş yanıt")[:200]}
+        return {"rc": rc or 3, "hata": hata_ozeti(err, out, rc or 3, os.path.basename(cmd[0])) if rc else
+                hata_ozeti(err, out, 0, os.path.basename(cmd[0]) + " (boş yanıt)")}
     note.write_text(parsed["metin"] + "\n", encoding="utf-8")
     return {"rc": 0, "jeton": parsed["jeton"], "araclar": {} if text_mode else {"web_search": parsed["arama"]}}
 
@@ -434,8 +461,9 @@ def run_worker(item, base, args, start_delay=0.0, sequence=None):
                 not any(k.startswith(("websearch", "oku_", "webfetch")) for k in tools_used):
             ok_contract, why = False, "hiç arama/okuma aracı çağrılmadı (not modelin ezberinden yazıldı, araştırma sayılmaz)"
         if r["rc"] == 0 and not ok_contract:
-            if RATE_RE.search(text[:6000]):
-                why = "arama hız sınırı (429) ya da adım bütçesi bitti: " + why
+            neden = sinir_nedeni(text[:6000])
+            if neden:
+                why = f"{neden}: {why}"
                 rc_fail = 10
             else:
                 rc_fail = 9
@@ -444,7 +472,8 @@ def run_worker(item, base, args, start_delay=0.0, sequence=None):
             bad = base / "hatali"   # incelemek için sakla; notlar/ dışında olduğundan denetime girmez
             bad.mkdir(exist_ok=True)
             note.replace(bad / f"{slug}.deneme{result['deneme']}.md")
-        result["denemeler"].append({"arka": backend, "rc": r["rc"], "hata": r.get("hata", ""), "bayt": size})
+        result["denemeler"].append({"arka": backend, "rc": r["rc"], "hata": r.get("hata", ""), "bayt": size,
+                                    "jeton": r.get("jeton") or [0, 0], "araclar": r.get("araclar") or {}})   # deneme başına maliyet/teşhis
         if r["rc"] == 0:
             result["ok"] = True
             break

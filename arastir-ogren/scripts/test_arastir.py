@@ -1325,5 +1325,87 @@ class RaporKontrol(unittest.TestCase):
                 self.assertEqual(rapor_kontrol.main(), 2)
 
 
+class HataTeshisi(unittest.TestCase):
+    """İlk bağımsız canlı denemede (9 Ekim 2026) görülen yararsız teşhisler: CLI "rc=5" + yalnız "}" ve belirsiz "429 ya da adım bütçesi"."""
+
+    def test_json_hata_ciktisinin_son_satiri_sadece_suslu_parantezse_anlamli_satirlar_alinir(self):
+        err = '{\n  "error": {\n    "code": "invalid_api_key",\n    "message": "Incorrect API key provided"\n  }\n}\n'
+        ozet = arastir.hata_ozeti(err, "", 5, "agent")
+        self.assertTrue(ozet.startswith("agent rc=5: "))
+        self.assertIn("Incorrect API key provided", ozet)
+        self.assertNotEqual(ozet.strip()[-1], "{")
+
+    def test_stderr_bossa_stdout_a_bakilir_ikisi_de_bossa_sessiz_denir(self):
+        self.assertIn("quota exceeded", arastir.hata_ozeti("", "başlıyor\nquota exceeded\n", 2, "c"))
+        self.assertIn("çıktı yok", arastir.hata_ozeti("  \n", "}\n", 5, "c"))
+
+    def test_anahtar_benzeri_deger_maskelenir_ve_uzunluk_sinirlidir(self):
+        ozet = arastir.hata_ozeti("api_key = sk-ABCDEF1234567890", "", 1, "c")
+        self.assertNotIn("ABCDEF1234567890", ozet)
+        self.assertIn("[GİZLİ]", ozet)
+        uzun = arastir.hata_ozeti("hata " + "x" * 500, "", 1, "c")
+        self.assertLessEqual(len(uzun), 200)
+        self.assertTrue(uzun.startswith("…"))
+        gizli = arastir.hata_ozeti("Authorization: Bearer abcdefghijklmnop12345\n", "", 1, "c")
+        self.assertNotIn("abcdefghijklmnop12345", gizli)
+        self.assertIn("[GİZLİ]", gizli)
+
+    def test_work_cli_hatali_cikis_kodunda_okunur_ozet_doner(self):
+        cfg = {"models": {"m": {"cli": "m"}}, "default_model": "m", "api_key_env": None, "key_files": [], "runtime_env": {},
+               "cli_backend": {"command": ["/usr/bin/agent-cli", "{prompt}"], "format": "text"}}
+        with tempfile.TemporaryDirectory() as d:
+            cfg_path = Path(d) / "c.json"; cfg_path.write_text(json.dumps(cfg))
+            with mock.patch.dict(os.environ, {"QUOTEPROOF_CONFIG": str(cfg_path)}):
+                ayar.reset()
+                err = '{\n "message": "unauthorized: login required"\n}\n'
+                with mock.patch.object(arastir, "run_cmd", return_value=(5, "", err, False)), \
+                     mock.patch.object(arastir.shutil, "which", return_value="/usr/bin/agent-cli"):
+                    r = arastir.work_cli("P", Path(d) / "n.md", "m", 30)
+                ayar.reset()
+        self.assertEqual(r["rc"], 5)
+        self.assertIn("agent-cli rc=5", r["hata"])
+        self.assertIn("unauthorized", r["hata"])
+
+    def test_sinir_nedeni_hiz_siniri_adim_butcesi_ikisi_ya_da_hicbiri(self):
+        self.assertEqual(arastir.sinir_nedeni("websearch 429 rate limit döndürdü"), "arama hız sınırı (429)")
+        self.assertEqual(arastir.sinir_nedeni("Maximum number of steps reached"), "adım bütçesi bitti (OpenCode adım sınırı)")
+        both = arastir.sinir_nedeni("429 rate limit ... maximum number of steps")
+        self.assertIn("hız sınırı", both); self.assertIn("adım bütçesi", both)
+        self.assertIsNone(arastir.sinir_nedeni("normal bir araştırma notu"))
+        self.assertIsNone(arastir.sinir_nedeni("HTTP 4290 kodu"))     # \b429\b: büyük sayıların içinde eşleşmez
+
+    def _kos(self, note_text, tools=None):
+        def fake(prompt_text, note, *a, **k):
+            note.write_text(note_text)
+            return {"rc": 0, "araclar": tools if tools is not None else {"websearch": 4}, "jeton": [1000, 50]}
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(arastir, "work_opencode", side_effect=fake), \
+             mock.patch.object(arastir, "work_cli", side_effect=lambda *a, **k: (a[1].write_text(GOOD_NOTE), {"rc": 0})[1]), \
+             mock.patch.object(arastir.time, "sleep"):
+            base = Path(d); (base / "istemler").mkdir(); (base / "notlar").mkdir()
+            args = mock.Mock(arka="otomatik", sure=60, model="fast", efor="dusuk", arama_yok=False, okuyucu="mcp")
+            return arastir.run_worker({"slug": "a", "konu": "k", "sorular": ["s?"]}, base, args, 0, ["opencode", "opencode", "cli"])
+
+    def test_adim_butcesi_notu_rc10_ve_acik_nedenle_kaydedilir(self):
+        res = self._kos("Araştırma tamamlanamadı: Maximum number of steps reached. " * 8)
+        d0 = res["denemeler"][0]
+        self.assertEqual(d0["rc"], 10)
+        self.assertIn("adım bütçesi bitti", d0["hata"])
+        self.assertNotIn("429", d0["hata"].split(":")[0])
+
+    def test_denemeler_deneme_basina_jeton_ve_arac_kaydeder(self):
+        res = self._kos("Araştırma tamamlanamadı: websearch 429 rate limit. " * 8)
+        d0 = res["denemeler"][0]
+        self.assertEqual(d0["jeton"], [1000, 50])
+        self.assertEqual(d0["araclar"], {"websearch": 4})
+        self.assertEqual(res["denemeler"][-1]["rc"], 0)             # cli yedeği başarılı: kayıt zinciri korunur
+
+    def test_parse_opencode_son_adim_nedenini_verir(self):
+        ev = [{"type": "step_start"}, {"type": "step_finish", "part": {"reason": "tool-calls", "tokens": {}}}]
+        r = arastir.parse_opencode_events("\n".join(json.dumps(e) for e in ev))
+        self.assertFalse(r["tamam"])
+        self.assertEqual(r["son_neden"], "tool-calls")
+        self.assertIsNone(arastir.parse_opencode_events("")["son_neden"])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)
