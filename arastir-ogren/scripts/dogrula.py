@@ -17,6 +17,7 @@ Her satıra kaynağın güvenilirlik puanı (guven.py) eklenir; 'Doğrulandı' a
 (alıntı sayfada VAR demektir, sayfanın DOĞRU olduğu demek değildir).
 """
 import argparse
+import difflib
 import json
 import re
 import sys
@@ -298,6 +299,71 @@ def judge(ev, page_norm):
     return verdict, found, total, missing
 
 
+WORD_RE = re.compile(r"\w+")
+NEAR_MIN_WORDS = 4         # bundan kısa alıntıda "en yakın geçiş" anlamsız
+NEAR_THRESHOLD = 0.6       # sözcük örtüşmesi bunun altındaysa yakın geçiş gösterilmez (ilgisiz sayfa)
+NEAR_MAX_ANCHORS = 300     # aday pencere sayısı sınırı (büyük sayfalarda sürenin kontrolü)
+DIGIT_PUNCT_RE = re.compile(r"\d[.,]\d")
+
+
+def yakin_gecis(alinti, page_norm, context=3):
+    """Sayfada BULUNAMAYAN bir alıntıya en yakın sayfa geçişi (0 jeton). Dönüş: {oran, gecis, noktalama_farki} ya da None.
+
+    oran = alıntı sözcüklerinin, sayfadaki en iyi pencerede SIRAYLA bulunan payı (noktalama yok sayılır). `noktalama_farki` yalnız şu durumda True:
+    alıntının TÜM sözcükleri sayfada bitişik ve aynı sırada, fark yalnız noktalama/boşluk (ör. alıntı "FIPS 203, …" sayfa "(FIPS) 203, …").
+    Alıntıda rakam-noktalama-rakam (1.5 / 1,5) varsa asla True olmaz: ondalık/binlik ayırıcı anlam taşır.
+    Bu bir yardımcıdır; yakın geçiş "birebir" demek değildir, karar yine metin eşleşmesiyle verilir."""
+    qn = norm(alinti)
+    q = [m.group(0) for m in WORD_RE.finditer(qn)]
+    if len(q) < NEAR_MIN_WORDS:
+        return None
+    spans = [(m.start(), m.end(), m.group(0)) for m in WORD_RE.finditer(page_norm)]
+    if len(spans) < len(q) // 2:
+        return None
+    qset = set(q)
+    positions = {}
+    for i, (_, _, w) in enumerate(spans):
+        if w in qset:
+            positions.setdefault(w, []).append(i)
+    anchors = sorted(i for w, ps in positions.items() if len(ps) <= 30 for i in ps)
+    if len(anchors) > NEAR_MAX_ANCHORS:
+        step = len(anchors) / NEAR_MAX_ANCHORS
+        anchors = [anchors[int(k * step)] for k in range(NEAR_MAX_ANCHORS)]
+    width = len(q) + 6
+    words = [w for _, _, w in spans]
+    best, seen = None, set()
+    for a in anchors:
+        start = max(0, a - 6)
+        if start in seen:
+            continue
+        seen.add(start)
+        win = words[start:start + width]
+        sm = difflib.SequenceMatcher(None, q, win, autojunk=False)
+        blocks = [b for b in sm.get_matching_blocks() if b.size]
+        matched = sum(b.size for b in blocks)
+        ratio = matched / len(q)
+        if best is None or ratio > best[0]:
+            best = (ratio, start, blocks)
+    if best is None or best[0] < NEAR_THRESHOLD:
+        return None
+    ratio, start, blocks = best
+    first, last = start + blocks[0].b, start + blocks[-1].b + blocks[-1].size - 1
+    lo, hi = max(0, first - context), min(len(spans) - 1, last + context)
+    passage = page_norm[spans[lo][0]:spans[hi][1]]
+    contiguous = len(blocks) == 1 and blocks[0].size == len(q)
+    return {"oran": round(ratio, 2), "gecis": passage[:300],
+            "noktalama_farki": bool(contiguous and not DIGIT_PUNCT_RE.search(qn))}
+
+
+def en_yakin_alinti(alintilar, page_norm):
+    best = None
+    for a in alintilar:
+        r = yakin_gecis(a, page_norm)
+        if r and (best is None or (r["noktalama_farki"], r["oran"]) > (best["noktalama_farki"], best["oran"])):
+            best = {**r, "alinti": a}
+    return best
+
+
 def collect(notes_dir, files=None):
     paths = sorted(p for p in Path(notes_dir).glob("*.md") if p.is_file() and (not files or p.name in set(files)))
     return [denetle.analyze(p) for p in paths]
@@ -332,9 +398,17 @@ def run(notes_dir, limit=0, jobs=4, cache_dir=None, files=None, hints=None):
             if not page["ok"]:
                 row = {"karar": "Erişilemedi", "bulunan": 0, "toplam": 0, "eksik": [], "neden": page["hata"], "url": url}
             else:
-                verdict, found, total, missing = judge(ev, page_text_norm(page["markdown"]))
+                page_norm = page_text_norm(page["markdown"])
+                verdict, found, total, missing = judge(ev, page_norm)
                 row = {"karar": verdict, "bulunan": found, "toplam": total, "eksik": missing, "neden": "", "url": url,
                        "enjeksiyon_izi": bool(oku.INJECTION.search(page["markdown"]))}
+                if verdict == "Bulunamadı" and ev["alinti"]:
+                    near = en_yakin_alinti(ev["alinti"], page_norm)
+                    if near:
+                        row["yakin"] = near
+                        if near["noktalama_farki"]:   # sözcükler birebir, yalnız noktalama/boşluk farklı: uydurma değil, "Kısmen" (insan bakışı)
+                            row.update(karar="Kısmen", neden="alıntının sözcükleri sayfada birebir var, yalnız noktalama/boşluk farklı; "
+                                                              "sayfada: «" + near["gecis"] + "»")
                 if verdict == "Doğrulandı":
                     ctx = baglam_kontrol(f["metin"], page["markdown"], ev, url)
                     if ctx:   # alıntı sayfada var ama iddianın özgün terimi ondan uzak: "Doğrulandı" demeyelim
@@ -350,6 +424,14 @@ def run(notes_dir, limit=0, jobs=4, cache_dir=None, files=None, hints=None):
     coverage = {"toplam_bulgu": total_findings, "url_li": with_url, "denenen": len(chosen), "kanitsiz": len(no_evidence),
                 "limit_disi": len(skipped), "urlsiz": total_findings - with_url}
     return rows, coverage
+
+
+def yakin_satiri(r):
+    """Bulunamayan alıntıya en yakın sayfa geçişi (varsa): kısaltılmış/değiştirilmiş alıntı ile uydurmayı ayırt etmeye yarar."""
+    y = r.get("yakin")
+    if not y or r.get("neden", "").startswith("alıntının sözcükleri"):
+        return ""
+    return f"\n  en yakın geçiş (%{int(y['oran'] * 100)} sözcük örtüşmesi; alıntı kısaltılmış/değiştirilmiş olabilir): «{y['gecis']}»"
 
 
 def render(rows, coverage):
@@ -371,13 +453,14 @@ def render(rows, coverage):
         L += ["", "## Claude'un elle bakacakları", ""]
         for r in todo:
             L.append(f"- **{r['karar']}** `{r['not']}` — {r['iddia'][:140]}\n  kaynak: {r['url']}" +
-                     (f"\n  sayfada bulunamayan: {', '.join(map(str, r['eksik'][:4]))}" if r["eksik"] else "") +
-                     (f"\n  neden: {r['neden']}" if r.get("neden") else ""))
+                     (f"\n  sayfada bulunamayan: {', '.join(map(str, r['eksik'][:4]))}"
+                      if r["eksik"] and not r.get("neden", "").startswith("alıntının sözcükleri") else "") +
+                     (f"\n  neden: {r['neden']}" if r.get("neden") else "") + yakin_satiri(r))
     notfound = [r for r in rows if r["karar"] == "Bulunamadı"]
     if notfound:
         L += ["", f"## RAPORA GİRMEZ: {len(notfound)} bulgunun alıntısı kaynak sayfada YOK (uydurma/çeviri/kaynak karışması şüphesi)", "",
               "Bunları sentez girdisinden çıkar (`--temiz-yaz` bunu yapar) ya da kaynağı elle açıp düzelt; düzeltmeden rapora alma.", ""]
-        L += [f"- `{r['not']}` — {re.sub(chr(10), ' ', r['iddia'])[:130]}\n  kaynak: {r['url']}" for r in notfound]
+        L += [f"- `{r['not']}` — {re.sub(chr(10), ' ', r['iddia'])[:130]}\n  kaynak: {r['url']}" + yakin_satiri(r) for r in notfound]
     weak = [r for r in rows if r["karar"] == "Doğrulandı" and r.get("guven", 100) < 50]
     if weak:
         L += ["", "## Alıntı sayfada var ama kaynak zayıf (güven <50): sayfanın doğruluğunu ikinci kaynakla teyit et", ""]

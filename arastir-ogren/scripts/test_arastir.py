@@ -1325,6 +1325,64 @@ class RaporKontrol(unittest.TestCase):
                 self.assertEqual(rapor_kontrol.main(), 2)
 
 
+class YakinGecis(unittest.TestCase):
+    """İlk canlı denemede (9 Ekim 2026) çalışan alıntıyı kısaltmıştı: sayfada "Federal Information Processing Standard (FIPS) 203, intended as…",
+    alıntıda "FIPS 203, intended as…". Doğrulayıcı doğru olarak "Bulunamadı" dedi ama "uydurma şüphesi" etiketi bu duruma fazla sertti."""
+    PAGE = ("Today NIST released three standards. Federal Information Processing Standard (FIPS) 203, intended as the primary standard "
+            "for general encryption. Among its advantages are comparatively small encryption keys that two parties can exchange easily.")
+    Q = "FIPS 203, intended as the primary standard for general encryption."
+
+    def test_noktalama_farki_yalniz_sozcukler_birebirse(self):
+        r = dogrula.yakin_gecis(self.Q, dogrula.page_text_norm(self.PAGE))
+        self.assertEqual(r["oran"], 1.0)
+        self.assertTrue(r["noktalama_farki"])
+        self.assertIn("(fips) 203", r["gecis"])
+
+    def test_degisen_sozcuk_noktalama_farki_sayilmaz_ama_yakin_gecis_gorunur(self):
+        r = dogrula.yakin_gecis("intended as the main standard for general encryption", dogrula.page_text_norm(self.PAGE))
+        self.assertFalse(r["noktalama_farki"])
+        self.assertGreaterEqual(r["oran"], 0.8)
+        self.assertIn("primary standard", r["gecis"])
+
+    def test_ilgisiz_sayfa_kisa_alinti_ve_bos_sayfada_yakin_gecis_yok(self):
+        self.assertIsNone(dogrula.yakin_gecis(self.Q, dogrula.page_text_norm("Bayraklı kırmızı bir uçurtma gökyüzünde süzülüyor ve herkes izliyor.")))
+        self.assertIsNone(dogrula.yakin_gecis("çok kısa alıntı", dogrula.page_text_norm(self.PAGE)))
+        self.assertIsNone(dogrula.yakin_gecis(self.Q, ""))
+
+    def test_ondalik_ayirici_farki_noktalama_farki_sayilmaz(self):
+        r = dogrula.yakin_gecis("the monthly limit is 1.5 million requests", dogrula.page_text_norm("note: the monthly limit is 1 5 million requests per key"))
+        self.assertIsNotNone(r)
+        self.assertFalse(r["noktalama_farki"])
+
+    def _calistir(self, quote, page):
+        note = f'# k\n## S\n### Alıntılı bulgular\n- Kurumsal açıklama — "{quote}" — [N](https://n.example/x)\n'
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / "n.md").write_text(note, encoding="utf-8")
+            with mock.patch.object(dogrula.oku, "load", return_value={"ok": True, "markdown": page, "hata": ""}):
+                rows, cov = dogrula.run(d, limit=0, jobs=1)
+        return rows[0], dogrula.render(rows, cov)
+
+    def test_run_noktalama_farki_kismen_olur_ve_rapora_girmez_basligina_dusmez(self):
+        row, text = self._calistir(self.Q, self.PAGE)
+        self.assertEqual(row["karar"], "Kısmen")
+        self.assertIn("noktalama/boşluk farklı", row["neden"])
+        self.assertNotIn("RAPORA GİRMEZ", text)
+        self.assertIn("(fips) 203", text)
+
+    def test_run_kisaltilmis_ama_degismis_alinti_bulunamadi_kalir_yakin_gecis_gosterilir(self):
+        row, text = self._calistir("intended as the main standard for general encryption", self.PAGE)
+        self.assertEqual(row["karar"], "Bulunamadı")
+        self.assertIn("RAPORA GİRMEZ", text)
+        self.assertIn("en yakın geçiş", text)
+        self.assertIn("primary standard", text)
+
+    def test_run_gercek_uydurma_alinti_bulunamadi_ve_yakin_gecis_yok(self):
+        row, text = self._calistir("quantum computers will break every encryption by next Tuesday morning", self.PAGE)
+        self.assertEqual(row["karar"], "Bulunamadı")
+        self.assertNotIn("yakin", row)
+        self.assertNotIn("en yakın geçiş", text)
+
+
 class HataTeshisi(unittest.TestCase):
     """İlk bağımsız canlı denemede (9 Ekim 2026) görülen yararsız teşhisler: CLI "rc=5" + yalnız "}" ve belirsiz "429 ya da adım bütçesi"."""
 

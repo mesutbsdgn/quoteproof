@@ -84,8 +84,8 @@ Her bulgu satırında dört öğe bulunur: **iddia**, **birebir alıntı**, **bu
 | Karar | Anlamı | Ne yapmalı |
 |---|---|---|
 | **Doğrulandı** | Her alıntı, rakam, sürüm ve kod parçası gösterilen sayfada bulundu. | Önemli iddialarda *anlamı* yine de kendiniz kontrol edin. |
-| **Kısmen** | Kanıtın bir kısmı bulundu ya da yalnızca tek bir zayıf öğe (tek başına bir rakam) eşleşti. | Sayfayı açıp bağlama bakın. |
-| **Bulunamadı** | Kanıtın çoğu bulunamadı: alıntı uydurulmuş, çevrilmiş ya da başka bir sayfadan alınmış olabilir. | Kullanmayın. `--temiz-yaz`, bunlar çıkarılmış temiz bir not kopyası yazar. |
+| **Kısmen** | Kanıtın bir kısmı bulundu, yalnızca tek bir zayıf öğe (tek başına bir rakam) eşleşti ya da alıntının sözcükleri sayfada birebir var ve yalnız noktalama farklı. | Sayfayı açıp bağlama bakın. |
+| **Bulunamadı** | Kanıtın çoğu bulunamadı: alıntı uydurulmuş, çevrilmiş, kısaltılmış ya da başka bir sayfadan alınmış olabilir. Varsa sayfadaki en yakın geçiş gösterilir. | Kullanmayın. `--temiz-yaz`, bunlar çıkarılmış temiz bir not kopyası yazar. |
 | **Erişilemedi** | Sayfa okunamadı: robots.txt engeli, JavaScript gerekliliği, zaman aşımı. | Kendiniz açın ya da ikinci bir kaynak bulun. |
 | **Kanıt yok** | Bulguda aranacak alıntı ya da rakam yok. | Elle inceleyin. |
 
@@ -271,12 +271,12 @@ Yazarın denemelerinde küçük bir konu, alt ajan başına yaklaşık 30 saniye
 - Okuyucu proxy kullanmaz ve DNS'i kendisi çözer. Yalnızca proxy üzerinden dışarı çıkılabilen ortamlarda çevrimiçi okuma ve alıntı doğrulama çalışmaz; çevrimdışı birim testleri etkilenmez.
 - Alt ajan istemleri, notlar ve raporlar varsayılan olarak Türkçedir (alıntılar kaynağın dilinde kalır).
 - Test setleri çevrimdışı birim testleridir; canlı hat uçtan uca elle denendi, CI'da çalışmaz.
-- **Canlı araştırmanın güvenilirliği kanıtlanmış değil.** İlk bağımsız denemede (başka bir makine, 9 Ekim 2026, farklı bir model, düşük efor) biten iki canlı görev de çıktı sözleşmesini geçemedi ve notları `hatali/` klasörüne taşındı. Komut satırı yedeği de işe yarar bir teşhis vermeyen bir çıkış koduyla bitti. Çevrimdışı kontroller geçti. Teşhis sonradan iyileştirildi (bkz. sürüm notları); sözleşme hatalarının kök nedeni ayrıştırılamadı. Araştırma alt ajanlarını deneysel sayın ve küçük bir konuyla başlayın.
+- **Canlı araştırmanın güvenilirliği kanıtlanmış değil.** İlk bağımsız denemede (başka bir makine, 9 Ekim 2026, farklı bir model, düşük efor) biten iki canlı görev de çıktı sözleşmesini geçemedi ve notları `hatali/` klasörüne taşındı. Komut satırı yedeği de işe yarar bir teşhis vermeyen bir çıkış koduyla bitti. Çevrimdışı kontroller geçti. Teşhis sonradan iyileştirildi (bkz. sürüm notları); sözleşme hatalarının kök nedeni ayrıştırılamadı. İkinci denemede (farklı bir konuda tek görev, orta efor, yalnız OpenCode) not sözleşmeyi geçti: dört benzersiz URL ve 10 alıntıdan 9'u doğrulandı; onuncusu tırnak içinde kısaltılmıştı. Tek başarılı çalıştırma güvenilirliği kanıtlamaz. Araştırma alt ajanlarını deneysel sayın ve küçük bir konuyla başlayın.
 
 ## Testler
 
 ```bash
-python3 arastir-ogren/scripts/test_arastir.py   # 145 test: ayrıştırma, sözleşme, devam, doğrulama, güven puanı, yapılandırma, MCP sunucusu
+python3 arastir-ogren/scripts/test_arastir.py   # 152 test: ayrıştırma, sözleşme, devam, doğrulama, güven puanı, yapılandırma, MCP sunucusu
 python3 arastir-ogren/scripts/test_oku.py       # 50 test: ayıklama, BM25, önbellek, SSRF, yönlendirme, robots.txt, PDF
 ```
 
@@ -307,6 +307,7 @@ Depoda henüz etiketli sürüm yok; kayıtlar en yeniden en eskiye, commit sıra
 - Okuyucunun proxy kullanmadığı, bu yüzden yalnızca proxy ile dışarı çıkılan ortamlarda çalışmadığı Sınırlar bölümüne eklendi.
 - Sınırlar bölümüne ilk bağımsız canlı denemenin dürüst bir özeti eklendi (biten iki görevin ikisi de çıktı sözleşmesini geçemedi).
 - `arastir.py` hata teşhisi iyileşti. Komut satırı arka ucu başarısız olunca artık tek başına `}` yerine komutu, çıkış kodunu ve son anlamlı çıktı satırlarını bildirir. Hız sınırı (429) ile adım bütçesinin bitmesi ayrı nedenler olarak yazılır. `calisma.json` her denemenin kendi jeton ve araç sayısını kaydeder. Testler: 145 + 50.
+- Doğrulayıcı: sayfada bulunamayan bir alıntı için artık sayfadaki en yakın geçişi ve sözcük örtüşmesini gösterir. Sözcükler birebir aynı, yalnız noktalama ya da boşluk farklıysa karar *Bulunamadı* yerine *Kısmen* olur (sayfadaki yazımla birlikte). İkinci bağımsız denemede bulundu: sayfada “(FIPS) 203, …” yazarken alıntı “FIPS 203, …” diye kısaltılmıştı. Değişmiş bir sözcük ya da rakam yine *Bulunamadı* verir. Testler: 152 + 50.
 
 ### Rapor düzeyinde kaynak kontrolü ([`c88db28`](https://github.com/mesutbsdgn/quoteproof/commit/c88db28), [#4](https://github.com/mesutbsdgn/quoteproof/issues/4))
 

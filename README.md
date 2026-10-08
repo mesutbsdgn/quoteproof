@@ -84,8 +84,8 @@ Each finding line carries **the claim**, **a verbatim quote**, **a URL of its ow
 | Verdict | Meaning | What you do |
 |---|---|---|
 | **Verified** (*Doğrulandı*) | Every quote, number, version and code token was found on the cited page. | Still spot-check *meaning* on claims that matter. |
-| **Partial** (*Kısmen*) | Some evidence was found, or only a single weak item (one lone number) matched. | Open the page; read the context. |
-| **Not found** (*Bulunamadı*) | Most of the evidence is missing — invented, translated, or taken from a different page. | Do not use it. `--temiz-yaz` writes a clean copy of the notes without these. |
+| **Partial** (*Kısmen*) | Some evidence was found, only a single weak item (one lone number) matched, or the quote's words are on the page exactly and only punctuation differs. | Open the page; read the context. |
+| **Not found** (*Bulunamadı*) | Most of the evidence is missing — invented, translated, shortened or taken from a different page. The nearest page passage is shown when one exists. | Do not use it. `--temiz-yaz` writes a clean copy of the notes without these. |
 | **Unreachable** (*Erişilemedi*) | The page could not be read: blocked by robots.txt, needs JavaScript, timed out. | Open it yourself, or find a second source. |
 | **No evidence** (*Kanıt yok*) | The finding has no quote or number to look up. | Manual review. |
 
@@ -271,12 +271,12 @@ In the author's runs, a small topic takes about 30 seconds per worker, and the a
 - Worker prompts, notes and reports are Turkish by default (quotes stay in the source language).
 - The reader uses no proxy and resolves DNS itself. In an environment where traffic can leave only through a proxy, online reading and quote verification do not work; the offline unit tests are unaffected.
 - The test suites are offline unit tests; the live pipeline has been exercised end-to-end by hand, not in CI.
-- **Reliability of live research is not established.** In the first independent trial (another machine, 9 October 2026, a different model, low effort), both live tasks that finished produced notes that failed the output contract and were moved to `hatali/`, and the command-line fallback exited with a code that gave no usable diagnosis. The offline checks passed. Diagnostics were improved afterwards (see the release notes); the root cause of the contract failures was not isolated. Treat the research workers as experimental and start with one small topic.
+- **Reliability of live research is not established.** In the first independent trial (another machine, 9 October 2026, a different model, low effort), both live tasks that finished produced notes that failed the output contract and were moved to `hatali/`, and the command-line fallback exited with a code that gave no usable diagnosis. The offline checks passed. Diagnostics were improved afterwards (see the release notes); the root cause of the contract failures was not isolated. A second trial (one task on a different topic, medium effort, OpenCode only) passed the contract: four distinct URLs and 9 of 10 quotes verified; the tenth was shortened inside the quotation marks. One passing run does not establish reliability. Treat the research workers as experimental and start with one small topic.
 
 ## Tests
 
 ```bash
-python3 arastir-ogren/scripts/test_arastir.py   # 145 tests: parsing, contract, resume, verification, trust score, config, MCP server
+python3 arastir-ogren/scripts/test_arastir.py   # 152 tests: parsing, contract, resume, verification, trust score, config, MCP server
 python3 arastir-ogren/scripts/test_oku.py       # 50 tests: extraction, BM25, cache, SSRF, redirects, robots.txt, PDF
 ```
 
@@ -307,6 +307,7 @@ There is no tagged release yet; entries are listed newest first, by commit. Meas
 - Added to Limitations: the reader uses no proxy, so it does not work where traffic can only leave through a proxy.
 - Added to Limitations: an honest account of the first independent live trial (both finished tasks failed the output contract).
 - Better failure diagnostics in `arastir.py`: a command-line back-end failure now reports the command, the exit code and the last meaningful output lines instead of a lone `}`; rate-limit (429) and step-budget exhaustion are reported as separate reasons; every attempt in `calisma.json` records its own token use and tool counts. Tests: 145 + 50.
+- Verifier: for a quote that is not on the page it now shows the nearest page passage and the word overlap. When the words match exactly and only punctuation or spacing differs, the verdict is *Partial* (with the page's wording) instead of *Not found*. Found in the second independent trial: a quote shortened to “FIPS 203, …” where the page says “(FIPS) 203, …”. A changed word or number still gives *Not found*. Tests: 152 + 50.
 
 ### Report-level source check ([`c88db28`](https://github.com/mesutbsdgn/quoteproof/commit/c88db28), [#4](https://github.com/mesutbsdgn/quoteproof/issues/4))
 
