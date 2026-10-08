@@ -106,6 +106,7 @@ Each finding line carries **the claim**, **a verbatim quote**, **a URL of its ow
 - **Verbatim-quote contract.** A finding without a checkable quote does not reach the report. This one rule is what turns "the model says so" into "the page says so".
 - **Every finding is checked — not a sample.** The report states its own coverage (tried / no evidence / skipped), so a gap can't hide.
 - **Boundary-aware matching.** `1.2` is not found inside `11.20`; `values[0]` is not `values0`; `v1.2.3` matches `1.2.3`; number formats are reconciled (`%26,2` ↔ `26.2%`, `100.000` ↔ `100,000`); deliberate `...` and editorial `[the]` inside a quote are tolerated.
+- **Context check.** For claims that carry a number, a distinctive term in the claim sentence must appear near the verified quote on the page; otherwise the verdict drops from *Verified* to *Partial* with the reason written down. A cheap heuristic (well under 1% of findings in real runs), not proof.
 - **Resumable runs.** `--devam` re-uses topics that already finished (the prompt hash must match). A checkpoint is written atomically after every topic, so a killed run loses nothing.
 - **Fail-closed workers.** A worker that asks for approval instead of researching, cites fewer than 3 distinct URLs, or never called a search/read tool is rejected and the next back-end takes over.
 - **Source trust score** (*a priority signal, never proof*). Starts from the domain's class, then adjusts for URL signals:
@@ -113,11 +114,12 @@ Each finding line carries **the claim**, **a verbatim quote**, **a URL of its ow
   | Class | Points | | Signal | Points |
   |---|---:|---|---|---:|
   | Official / standards body | 90 | | Source named in your plan | +10 |
-  | Academic publisher | 85 | | Plain `http` | −10 |
-  | Official documentation | 80 | | Listicle / SEO-style URL | −8 |
-  | Preprint · news | 70 | | Suspicious TLD | −10 |
-  | Code host | 65 | | IP-address host | −15 |
-  | Encyclopedia | 60 | | Tracking parameters | −3 |
+  | Security standards (OWASP, MITRE, CVE, CERT) | 88 | | Plain `http` | −10 |
+  | Academic publisher | 85 | | Listicle / SEO-style URL | −8 |
+  | Official documentation | 80 | | Suspicious TLD | −10 |
+  | Preprint · news | 70 | | IP-address host | −15 |
+  | Code host | 65 | | Tracking parameters | −3 |
+  | Encyclopedia | 60 | | | |
   | Community / social | 25–55 | | | |
   | Unknown | 50 | | | |
 
@@ -259,7 +261,7 @@ In our runs, a small topic takes about 30 seconds per worker, and the audit + ve
 ## Tests
 
 ```bash
-python3 arastir-ogren/scripts/test_arastir.py   # 115 tests: parsing, contract, resume, verification, trust score, config, MCP server
+python3 arastir-ogren/scripts/test_arastir.py   # 124 tests: parsing, contract, resume, verification, trust score, config, MCP server
 python3 arastir-ogren/scripts/test_oku.py       # 50 tests: extraction, BM25, cache, SSRF, redirects, robots.txt, PDF
 ```
 

@@ -78,6 +78,73 @@ def page_text_norm(markdown):
     return "\n".join([base, norm(re.sub(r"-[ \t]*\r?\n[ \t]*", "", markdown)), norm(re.sub(r"-[ \t]*\r?\n[ \t]*", "-", markdown))])
 
 
+# ----------------------------------------------------------------------------- bağlam kontrolü (iddia ↔ alıntı yakınlığı)
+CONTEXT_WINDOW = 1500      # karakter: özgün terim, doğrulanan alıntının bu kadar yakınında değilse şüphe
+CONTEXT_MAX_FREQ = 5       # sayfada en çok bu kadar geçen terim "özgün" sayılır (her yerde geçen terim kanıt değildir)
+CONTEXT_TITLE_ZONE = 400   # sayfanın ilk karakterleri (başlık/giriş): orada adı geçen konu TÜM sayfanın konusudur, "uzak" sayılmaz
+ANCHOR_RE = re.compile(r"(?<![\w-])[A-Za-z][A-Za-z0-9]*(?:-[A-Za-z0-9]+)*(?![\w-])")
+ANCHOR_STOP = set("""about above after again against also because before being between both could does doing down during each from further have having here
+into itself just more most other over same should some such than that their them then there these they this those through under until very were what when
+where which while with would your claim finding quote source page text paper study report article section value number result results using used uses""".split())
+
+
+def claim_prose(finding_text):
+    """İddia metninin alıntı/kod/bağlantı/künye DIŞINDaki kısmı (çalışanın kendi cümlesi)."""
+    t = re.sub(r"\[[^\]]*\]\((?:[^()]|\([^()]*\))*\)", " ", finding_text)
+    t = re.sub(r"https?://\S+", " ", t)
+    t = META_TAG_RE.sub(" ", t)
+    t = CODE_RE.sub(" ", t)
+    return re.sub(r'"[^"]*"|[“«][^”»]*[”»]', " ", t)
+
+
+def _quote_span(base, quote):
+    """Alıntının (en uzun anlamlı parçasının) normalize sayfa metnindeki [başlangıç, bitiş) aralığı; bulunamazsa None."""
+    raw = MD_LINK_RE.sub(r"\1", quote)
+    parts = [norm(x) for x in re.split(r"\.{3,}|…|" + EDITORIAL_RE, raw)]
+    parts = [x for x in parts if len(x) >= 8] or [norm(quote)]
+    part = max(parts, key=len)
+    i = base.find(part)
+    return (i, i + len(part)) if i >= 0 else None
+
+
+def baglam_kontrol(finding_text, markdown, ev, url=""):
+    """İddiadaki ÖZGÜN terim(ler) doğrulanan alıntıdan uzaktaysa uyarı sözlüğü, aksi halde None. 0 jeton, sezgisel.
+
+    Neden: alıntı sayfada VAR olsa da iddia onu yanlış öznenin üstüne yapıştırmış olabilir (gerçek örnek: makalenin kendi tüm saldırıları için verdiği
+    "%43–98" başarı oranı, "drag-and-drop" varyantına atfedilmişti; o terim sayfada yalnız başka bir yerde, bir kez geçiyordu). Kural: iddia cümlesindeki Latin
+    terimlerden sayfada seyrek (≤5) geçenler "özgün"dür; hiçbiri alıntının ±CONTEXT_WINDOW karakteri içinde değilse şüphe. Özgün terim yoksa (iddia tamamen Türkçe,
+    ya da terimler alıntıda/yaygın) kontrol YAPILMAZ: yanlış alarm yerine sessizlik."""
+    if not ev["alinti"]:
+        return None
+    if not (ev["sayi"] or re.search(r"\d", " ".join(ev["alinti"]))):
+        return None   # yalnız SAYI taşıyan iddialar: yanlış özneye yapışan sayı yanlış bir olgu üretir; sayısız iddialarda sezgi çok gürültülü (ölçüldü)
+    base = norm(markdown)
+    span = next((sp for sp in (_quote_span(base, q) for q in ev["alinti"]) if sp), None)
+    if not span:
+        return None
+    quote_norm = " ".join(norm(q) for q in ev["alinti"])
+    host_labels = set(re.split(r"[^a-z0-9]+", urlparse(url).netloc.lower())) if url else set()   # "yandex" yandex.com sayfasında anchor olmaz
+    anchors = {}
+    for tok in ANCHOR_RE.findall(claim_prose(finding_text)):
+        t = norm(tok)
+        if t in anchors or t in ANCHOR_STOP or t in quote_norm or t in host_labels:
+            continue
+        if not (len(t) >= 5 or (tok.isupper() and len(tok) >= 3)):
+            continue
+        hits = [m.start() for m in re.finditer(r"(?<![\w-])" + re.escape(t) + r"(?![\w-])", base)]
+        if 1 <= len(hits) <= CONTEXT_MAX_FREQ:
+            anchors[t] = min(0 if (span[0] <= h <= span[1] or h < CONTEXT_TITLE_ZONE) else min(abs(h - span[0]), abs(h - span[1])) for h in hits)
+    if anchors and all(d > CONTEXT_WINDOW for d in anchors.values()):
+        return {"terimler": anchors, "pencere": CONTEXT_WINDOW}
+    return None
+
+
+def baglam_notu(ctx):
+    terms = ", ".join(f"'{t}' ({d} karakter uzakta)" for t, d in sorted(ctx["terimler"].items(), key=lambda kv: kv[1])[:3])
+    return (f"bağlam şüphesi: iddiadaki özgün terim(ler) {terms} doğrulanan alıntıdan ±{ctx['pencere']} karakter dışında; "
+            "alıntı sayfada var ama iddiayla aynı konuyu anlatıyor mu, elle bak")
+
+
 def evidence(finding_text):
     """Maddeden kanıt dizgileri çıkarır. Alıntı/kod ham metinden (içlerindeki bağlantı/URL korunur, sayfa tarafı norm() ile aynı biçime iner);
     sayılar kaynak bağlantıları ve künye etiketi atıldıktan sonra çıkarılır."""
@@ -224,6 +291,10 @@ def run(notes_dir, limit=0, jobs=4, cache_dir=None, files=None, hints=None):
                 verdict, found, total, missing = judge(ev, page_text_norm(page["markdown"]))
                 row = {"karar": verdict, "bulunan": found, "toplam": total, "eksik": missing, "neden": "", "url": url,
                        "enjeksiyon_izi": bool(oku.INJECTION.search(page["markdown"]))}
+                if verdict == "Doğrulandı":
+                    ctx = baglam_kontrol(f["metin"], page["markdown"], ev, url)
+                    if ctx:   # alıntı sayfada var ama iddianın özgün terimi ondan uzak: "Doğrulandı" demeyelim
+                        row.update(karar="Kısmen", neden=baglam_notu(ctx), baglam=ctx)
             if best is None or (RANK[row["karar"]], row["bulunan"]) > (RANK[best["karar"]], best["bulunan"]):
                 best = row
         trust = guven.score(best["url"], guven.hints_for(hints, Path(name).stem))

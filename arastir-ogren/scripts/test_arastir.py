@@ -1122,5 +1122,89 @@ class TireVeTabloAyiriciToleransi(unittest.TestCase):
         self.assertEqual(dogrula.judge(ev, page)[0], "Bulunamadı")
 
 
+class BaglamKontrolu(unittest.TestCase):
+    """Sayı taşıyan iddiada özgün terim, doğrulanan alıntıdan uzaksa şüphe (sezgisel)."""
+    QUOTE = "we show that our attacks have success rates ranging from 43% to 98%"
+
+    def _page(self, term_pos):
+        filler = "Lorem ipsum dolor sit amet consectetur adipiscing elit. " * 70          # ~4000 karakter
+        abstract = f"Abstract. {self.QUOTE}, and our defense is effective. "
+        body = {"uzak": abstract + filler + " Evil sites steal content by tricking the victim to perform a drag-and-drop action. ",
+                "yakin": abstract + " They also use a drag-and-drop action in one attack. " + filler,
+                "baslik": "Drag-and-drop attacks revisited. " + abstract + filler,
+                "yok": abstract + filler}[term_pos]
+        return body
+
+    def _finding(self, prose="Drag-and-drop clickjacking: başarı oranı %43–98"):
+        return f'{prose} — "{self.QUOTE}" — [U](https://www.usenix.org/conference/x/y) (2012-08, birincil)'
+
+    def _check(self, term_pos, finding=None, url="https://www.usenix.org/conference/x/y"):
+        finding = finding or self._finding()
+        return dogrula.baglam_kontrol(finding, self._page(term_pos), dogrula.evidence(finding), url)
+
+    def test_ozgun_terim_alintidan_uzaktaysa_isaretlenir(self):
+        ctx = self._check("uzak")
+        self.assertIsNotNone(ctx)
+        self.assertGreater(ctx["terimler"]["drag-and-drop"], dogrula.CONTEXT_WINDOW)
+        self.assertIn("bağlam şüphesi", dogrula.baglam_notu(ctx))
+
+    def test_terim_alintinin_yakinindaysa_baslikta_ise_ya_da_sayfada_yoksa_susar(self):
+        for pos in ("yakin", "baslik", "yok"):
+            self.assertIsNone(self._check(pos), pos)
+
+    def test_sayisiz_iddia_kontrol_edilmez(self):
+        finding = '[U]: Drag-and-drop clickjacking — "attacks are dangerous in practice here" — [U](https://x.y)'
+        self.assertIsNone(dogrula.baglam_kontrol(finding, self._page("uzak"), dogrula.evidence(finding), ""))
+
+    def test_sayfa_adresindeki_terim_ve_yaygin_terim_anchor_olmaz(self):
+        finding = self._finding("Usenix attacks: başarı oranı %43–98")
+        self.assertIsNone(self._check("uzak", finding))                       # 'usenix' sayfa adresinde
+        common = self._page("uzak") + " clickjacking" * 9
+        f2 = self._finding("Clickjacking: başarı oranı %43–98")
+        self.assertIsNone(dogrula.baglam_kontrol(f2, common, dogrula.evidence(f2), ""))   # sayfada >5 kez → özgün değil
+
+    def test_tamamen_turkce_iddia_kontrol_disi_birakir(self):
+        finding = self._finding("Saldırıların başarı oranı yüzde kırk üç ile doksan sekiz arasında")
+        self.assertIsNone(self._check("uzak", finding))
+
+    def test_run_icinde_dogrulandi_kismene_duser_ve_neden_yazilir(self):
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / "n.md").write_text("# k\n## S\n### Özet\nx\n### Alıntılı bulgular\n- " + self._finding() + "\n### Çıkarımlar\n- c\n### Boşluklar\n- b\n", encoding="utf-8")
+            page = {"ok": True, "markdown": self._page("uzak"), "hata": ""}
+            with mock.patch.object(dogrula.oku, "load", return_value=page):
+                rows, _ = dogrula.run(d, jobs=1)
+            near = {"ok": True, "markdown": self._page("yakin"), "hata": ""}
+            with mock.patch.object(dogrula.oku, "load", return_value=near):
+                rows2, _ = dogrula.run(d, jobs=1)
+        self.assertEqual(rows[0]["karar"], "Kısmen")
+        self.assertIn("bağlam şüphesi", rows[0]["neden"])
+        self.assertEqual(rows2[0]["karar"], "Doğrulandı")
+
+
+class GuvenlikAlaniSiniflari(unittest.TestCase):
+    def test_guvenlik_kaynaklari_belirsiz_50_degil(self):
+        expect = {"https://owasp.org/www-community/attacks/Clickjacking": ("güvenlik standardı/rehberi", 88),
+                  "https://cheatsheetseries.owasp.org/cheatsheets/Clickjacking_Defense_Cheat_Sheet.html": ("güvenlik standardı/rehberi", 88),
+                  "https://cwe.mitre.org/data/definitions/1021.html": ("güvenlik standardı/rehberi", 88),
+                  "https://attack.mitre.org/": ("güvenlik standardı/rehberi", 88),
+                  "https://kb.cert.org/vuls/": ("güvenlik standardı/rehberi", 88),
+                  "https://www.usenix.org/conference/usenixsecurity12": ("akademik", 85),
+                  "https://portswigger.net/web-security/clickjacking": ("resmî doküman", 80),
+                  "https://googleprojectzero.blogspot.com/2024/x.html": ("resmî doküman", 80),   # blogspot.com (40) değil: daha özel sonek kazanır
+                  "https://thehackernews.com/2025/01/x.html": ("sektör basını", 68)}
+        for url, (cls, pts) in expect.items():
+            r = guven.score(url)
+            self.assertEqual((r["sinif"], r["puan"]), (cls, pts), url)
+
+    def test_taklit_alan_adlari_siniflanmaz(self):
+        for url in ("https://owasp.org.evil.example/x", "https://notowasp.org/x", "https://mitre.org.cn.example/x", "https://usenix.org.example.com/x",
+                    "https://thehackernews.com.evil.io/x"):
+            self.assertEqual(guven.score(url)["sinif"], "belirsiz", url)
+
+    def test_birincil_denen_owasp_artik_uyusmazlik_bayragi_almaz(self):
+        f = {"metin": "x (2026-09, birincil)", "urls": ["https://cheatsheetseries.owasp.org/cheatsheets/Clickjacking_Defense_Cheat_Sheet.html"]}
+        self.assertEqual(guven.assess(f, today=datetime.date(2026, 10, 8))["bayrak"], [])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)

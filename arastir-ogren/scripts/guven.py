@@ -5,7 +5,7 @@ URL → {"puan": 0-100, "sinif": ..., "gerekce": [...]}. Şeffaf bir buluşsald�
 + (isteğe bağlı) PLAN.json `kaynaklar` ipuçları. Puan KANIT DEĞİLDİR; hangi bulguyu önce elle doğrulayacağını ve hangisinin
 tek başına rapora girmemesi gerektiğini söyleyen bir ÖNCELİK sinyalidir. İçerik doğruluğu `dogrula.py` + Claude'a aittir.
 
-Sınıflar (taban puan): resmî/standart 90 · akademik 85 · resmî doküman 80 · ön baskı 70 · haber 70 · sektör basını 68 · teknik basın 65 ·
+Sınıflar (taban puan): resmî/standart 90 · güvenlik standardı/rehberi 88 · akademik 85 · resmî doküman 80 · ön baskı 70 · haber 70 · sektör basını 68 · teknik basın 65 ·
 kod deposu 65 · ansiklopedi 60 · topluluk 25-55 · belirsiz 50. Sinyaller: planda beklenen kaynak +10, http −10, IP adresi −15,
 SEO/derleme URL kalıbı −8, şüpheli TLD −10, izleme parametresi −3.
 
@@ -30,22 +30,32 @@ CLASSES = [
                            "resmigazete.gov.tr", "mevzuat.gov.tr", "who.int", "oecd.org", "worldbank.org", "imf.org"]),
     ("akademik", 85, ["nature.com", "science.org", "acm.org", "ieee.org", "springer.com", "sciencedirect.com", "ncbi.nlm.nih.gov",
                       "pubmed.ncbi.nlm.nih.gov", "aclanthology.org", "openreview.net", "doi.org", "jstor.org", "cell.com", "thelancet.com",
-                      "nejm.org", "bmj.com", "plos.org", "pnas.org", "wiley.com"]),
+                      "nejm.org", "bmj.com", "plos.org", "pnas.org", "wiley.com",
+                      # güvenlik akademisi (8 Eki 2026: USENIX makalesi "belirsiz 50" puan almıştı)
+                      "usenix.org", "ndss-symposium.org", "iacr.org", "ieee-security.org", "citizenlab.ca"]),
+    # Güvenlik standartları/rehberleri ve zafiyet kayıtları: alanın birincil referansları (OWASP, MITRE CWE/CAPEC/ATT&CK/CVE, FIRST/CVSS, CERT/CC...).
+    ("güvenlik standardı/rehberi", 88, ["owasp.org", "mitre.org", "cve.org", "first.org", "cert.org", "sans.org", "cisecurity.org"]),
     ("ön baskı", 70, ["arxiv.org", "biorxiv.org", "medrxiv.org", "ssrn.com", "researchgate.net", "semanticscholar.org"]),
     ("resmî doküman", 80, ["readthedocs.io", "readthedocs.org", "pypi.org", "npmjs.com", "crates.io", "pkg.go.dev", "docs.rs", "rubygems.org",
                            "developer.mozilla.org", "learn.microsoft.com", "man7.org", "kernel.org", "python.org", "nodejs.org", "rust-lang.org",
                            "go.dev", "developer.apple.com", "developer.android.com", "cloud.google.com", "docs.aws.amazon.com", "kubernetes.io",
-                           "postgresql.org", "sqlite.org"]),
+                           "postgresql.org", "sqlite.org",
+                           # araç/ürün sahibinin kendi dokümanı ve zafiyet duyuruları (kendi ürünü hakkında birincil)
+                           "portswigger.net", "msrc.microsoft.com", "security.googleblog.com", "googleprojectzero.blogspot.com"]),
     ("kod deposu", 65, ["github.com", "gitlab.com", "codeberg.org", "bitbucket.org", "raw.githubusercontent.com", "github.io"]),
     ("ansiklopedi", 60, ["wikipedia.org", "wikimedia.org", "britannica.com"]),
     ("haber", 70, ["reuters.com", "apnews.com", "bbc.com", "bbc.co.uk", "nytimes.com", "ft.com", "economist.com", "wsj.com", "bloomberg.com",
                    "theguardian.com", "aa.com.tr", "trthaber.com"]),
-    # 8 Eki 2026 (İHA araştırması): 83 savunma kaynağı "belirsiz" göründü; yerleşik savunma/havacılık sektör yayınları ayrı sınıf.
+    # 8 Eki 2026 (İHA araştırması): 83 savunma kaynağı "belirsiz" göründü; yerleşik savunma/havacılık ve siber güvenlik sektör yayınları ayrı sınıf.
     ("sektör basını", 68, ["breakingdefense.com", "defensenews.com", "janes.com", "aviationweek.com", "airandspaceforces.com", "twz.com",
                            "thedrive.com", "flightglobal.com", "militarytimes.com", "airforcetimes.com", "armytimes.com", "navytimes.com",
                            "defenseone.com", "c4isrnet.com", "defensescoop.com", "thedefensepost.com", "news.usni.org", "usni.org",
                            "nationaldefensemagazine.org", "insidedefense.com", "defense.info", "euractiv.com", "kyivindependent.com",
-                           "csis.org", "rusi.org", "iiss.org", "cnas.org", "brookings.edu", "rand.org", "warontherocks.com", "thediplomat.com"]),
+                           "csis.org", "rusi.org", "iiss.org", "cnas.org", "brookings.edu", "rand.org", "warontherocks.com", "thediplomat.com",
+                           # siber güvenlik haber/araştırma yayınları (ikincil; satıcı blogları kendi bulguları için birincil sayılmaz)
+                           "thehackernews.com", "bleepingcomputer.com", "krebsonsecurity.com", "therecord.media", "securityweek.com", "darkreading.com",
+                           "schneier.com", "helpnetsecurity.com", "securelist.com", "welivesecurity.com", "blog.talosintelligence.com",
+                           "unit42.paloaltonetworks.com"]),
     ("teknik basın", 65, ["arstechnica.com", "theregister.com", "infoq.com", "lwn.net", "theverge.com", "wired.com", "techcrunch.com"]),
     ("topluluk", 55, ["stackoverflow.com", "stackexchange.com", "serverfault.com", "superuser.com", "askubuntu.com"]),
     ("topluluk", 45, ["substack.com", "hashnode.dev", "gist.github.com"]),

@@ -106,6 +106,7 @@ Her bulgu satırı **iddiayı**, **birebir bir alıntıyı**, **kendi URL'sini**
 - **Birebir alıntı sözleşmesi.** Denetlenebilir alıntısı olmayan bulgu rapora ulaşmaz. "Model öyle diyor" ile "sayfa öyle diyor" arasındaki farkı bu tek kural yaratır.
 - **Örnek değil, her bulgu denetlenir.** Rapor kendi kapsamını da söyler (denenen / kanıtsız / atlanan); böylece boşluk gizlenemez.
 - **Sınır duyarlı eşleşme.** `1.2`, `11.20` içinde bulunmaz; `values[0]` ≠ `values0`; `v1.2.3`, `1.2.3` ile eşleşir; sayı biçimleri uzlaştırılır (`%26,2` ↔ `26.2%`, `100.000` ↔ `100,000`); alıntıdaki kasıtlı `...` ve editör eki `[the]` tolere edilir.
+- **Bağlam kontrolü.** Sayı taşıyan iddialarda, iddia cümlesindeki özgün bir terim sayfada doğrulanan alıntının yakınında geçmelidir; geçmiyorsa karar *Doğrulandı*'dan *Kısmen*'e düşer ve nedeni yazılır. Ucuz bir sezgidir (gerçek koşularda bulguların %1'inden çok daha azı), kanıt değildir.
 - **Sürdürülebilir koşular.** `--devam`, bitmiş konuları yeniden kullanır (istem özeti eşleşmelidir). Her konudan sonra atomik bir kontrol noktası yazılır; öldürülen koşu hiçbir şey kaybetmez.
 - **Kapalı-varsayılan çalışanlar.** Araştırma yapmak yerine onay isteyen, 3'ten az benzersiz URL gösteren ya da hiç arama/okuma aracı çağırmayan çalışan reddedilir ve sıradaki arka uç devralır.
 - **Kaynak güven puanı** (*bir öncelik sinyalidir, asla kanıt değildir*). Alan adının sınıfından başlar, sonra URL sinyalleriyle ayarlanır:
@@ -113,11 +114,12 @@ Her bulgu satırı **iddiayı**, **birebir bir alıntıyı**, **kendi URL'sini**
   | Sınıf | Puan | | Sinyal | Puan |
   |---|---:|---|---|---:|
   | Resmî / standart kurumu | 90 | | Planda adı geçen kaynak | +10 |
-  | Akademik yayıncı | 85 | | Düz `http` | −10 |
-  | Resmî doküman | 80 | | Liste / SEO tarzı URL | −8 |
-  | Ön baskı · haber | 70 | | Şüpheli TLD | −10 |
-  | Kod deposu | 65 | | IP adresi ana bilgisayar | −15 |
-  | Ansiklopedi | 60 | | İzleme parametreleri | −3 |
+  | Güvenlik standardı (OWASP, MITRE, CVE, CERT) | 88 | | Düz `http` | −10 |
+  | Akademik yayıncı | 85 | | Liste / SEO tarzı URL | −8 |
+  | Resmî doküman | 80 | | Şüpheli TLD | −10 |
+  | Ön baskı · haber | 70 | | IP adresi ana bilgisayar | −15 |
+  | Kod deposu | 65 | | İzleme parametreleri | −3 |
+  | Ansiklopedi | 60 | | | |
   | Topluluk / sosyal | 25–55 | | | |
   | Bilinmeyen | 50 | | | |
 
@@ -259,7 +261,7 @@ Koşularımızda küçük bir konu çalışan başına yaklaşık 30 saniye sür
 ## Testler
 
 ```bash
-python3 arastir-ogren/scripts/test_arastir.py   # 115 test: ayrıştırma, sözleşme, devam, doğrulama, güven puanı, yapılandırma, MCP sunucusu
+python3 arastir-ogren/scripts/test_arastir.py   # 124 test: ayrıştırma, sözleşme, devam, doğrulama, güven puanı, yapılandırma, MCP sunucusu
 python3 arastir-ogren/scripts/test_oku.py       # 50 test: ayıklama, BM25, önbellek, SSRF, yönlendirme, robots.txt, PDF
 ```
 
