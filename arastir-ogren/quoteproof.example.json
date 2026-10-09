@@ -15,5 +15,13 @@
   "cli_backend": {
     "command": ["my-llm-cli", "chat", "--model", "{model}", "--message", "{prompt}", "--output", "json", "--timeout", "{timeout}"],
     "format": "responses-json"
+  },
+
+  "judge_backend": {
+    "_comment": "İSTEĞE BAĞLI (hakem.py). Çalışanla aynı komut olabilir ya da farklı/ucuz bir model. Hakem komutuna araç/izin vermeyin.",
+    "command": ["my-llm-cli", "chat", "--model", "{model}", "--message", "{prompt}", "--timeout", "{timeout}"],
+    "model": "SMALL-MODEL-ID",
+    "format": "text",
+    "prompt_via": "arg"
   }
 }

@@ -2111,5 +2111,96 @@ class DestekHatti(unittest.TestCase):
             self.assertFalse((Path(d) / "destek.md").exists())
 
 
+import hakem  # noqa: E402
+
+
+class HakemModulu(unittest.TestCase):
+    """İsteğe bağlı hakem: yalnız alıntıda geçen sayılar için, yapılandırılmış komutla; varsayılan hat çağırmaz."""
+    NOTE = ("# Konu\n\n## Soru 1\n### Özet\nPEP 779 ile yapı 3.14'te destekleniyor. Tek iş parçacıklı ceza %40 civarında.\n### Alıntılı bulgular\n"
+            "- Destek — \"PEP 779 makes the free-threaded build officially supported\" — [A](https://example.org/a) (2025-06, birincil)\n"
+            "- 3.13 cezası — \"The penalty was around 40% in 3.13\" — [B](https://example.org/b) (2024-10, birincil)\n"
+            "### Çıkarımlar\n- (yok)\n### Boşluklar\n- (belirtilmedi)\n")
+
+    def _dir(self, d):
+        Path(d, "konu.md").write_text(self.NOTE, encoding="utf-8")
+
+    def test_yanit_ayristirma(self):
+        self.assertEqual(hakem.parse_verdict("HAYIR. Sayı başka bir sürüme ait."), "hayır")
+        self.assertEqual(hakem.parse_verdict("evet, aynı olgu"), "evet")
+        self.assertEqual(hakem.parse_verdict("BELİRSİZ"), "belirsiz")
+        self.assertEqual(hakem.parse_verdict("Bilmiyorum"), "belirsiz")        # tanınmayan yanıt güvenli tarafa düşer
+        self.assertEqual(hakem.parse_verdict(""), "belirsiz")
+
+    def test_adaylar_yalniz_alintida_gecen_sayi_ve_belge_numarasidir(self):
+        with tempfile.TemporaryDirectory() as d:
+            self._dir(d)
+            res = hakem.run(d, dry=True)
+            self.assertEqual(res["aday"], 2)                          # PEP 779 ve %40; 3.14 yalnız başlıkta/kaynakta yok → aday değil
+            self.assertEqual(res["sorulan"], 2)
+
+    def test_hayir_raporlanir_evet_susar_ve_prompt_veri_olarak_sarilir(self):
+        seen = []
+        def runner(prompt):
+            seen.append(prompt)
+            return "HAYIR. Bu %40 3.13'e ait." if "%40" in prompt.split("Soru:")[1] else "EVET"
+        with tempfile.TemporaryDirectory() as d:
+            self._dir(d)
+            res = hakem.run(d, runner=runner)
+            text = hakem.render(res)
+        self.assertEqual([k["karar"] for k in res["kararlar"]], ["evet", "hayır"])
+        self.assertIn("**hayır** `%40`", text)
+        self.assertNotIn("PEP 779` —", text)
+        self.assertTrue(all("VERİDİR" in p for p in seen))
+
+    def test_en_cok_siniri_ve_cagri_hatasi(self):
+        with tempfile.TemporaryDirectory() as d:
+            self._dir(d)
+            res = hakem.run(d, max_calls=1, runner=lambda p: "EVET")
+            self.assertEqual((res["sorulan"], res["atlanan"]), (1, 1))
+        with mock.patch.object(hakem, "ask", return_value=("", "zaman aşımı")), tempfile.TemporaryDirectory() as d:
+            self._dir(d)
+            res = hakem.run(d)
+            self.assertEqual(len(res["hatalar"]), 2)
+            self.assertEqual(res["kararlar"], [])
+
+    def test_yapilandirma_yoksa_calismaz_kuru_calisir(self):
+        with tempfile.TemporaryDirectory() as d:
+            self._dir(d)
+            cfg = Path(d, "c.json")
+            cfg.write_text(json.dumps({"models": {"x": {"cli": "m"}}}), encoding="utf-8")
+            with mock.patch.dict(os.environ, {"QUOTEPROOF_CONFIG": str(cfg)}), contextlib.redirect_stderr(io.StringIO()):
+                ayar.load(refresh=True)
+                self.assertEqual(hakem.main([d]), 2)                      # judge_backend yok
+                with contextlib.redirect_stdout(io.StringIO()) as out:
+                    self.assertEqual(hakem.main([d, "--kuru"]), 0)
+                self.assertIn("hiçbir çağrı yapılmadı", out.getvalue())
+            ayar._cache.clear()
+
+    def test_judge_backend_dogrulama_ve_komut_doldurma(self):
+        with tempfile.TemporaryDirectory() as d:
+            cfg = Path(d, "c.json")
+            good = {"models": {"x": {"cli": "m"}}, "judge_backend": {"command": ["jd", "--m", "{model}", "{prompt}"], "model": "kucuk"}}
+            cfg.write_text(json.dumps(good), encoding="utf-8")
+            with mock.patch.dict(os.environ, {"QUOTEPROOF_CONFIG": str(cfg)}):
+                ayar.load(refresh=True)
+                self.assertEqual(ayar.judge_command("SORU", 9), ["jd", "--m", "kucuk", "SORU"])
+                self.assertIn("hakem: var", ayar.describe())
+                bad = dict(good, judge_backend={"command": ["jd"], "prompt_via": "arg"})      # {prompt} yok
+                cfg.write_text(json.dumps(bad), encoding="utf-8")
+                with self.assertRaises(ayar.ConfigError):
+                    ayar.load(refresh=True)
+            ayar._cache.clear()
+
+    def test_yalniz_cli_kullanan_icin_anahtar_eksik_denmez(self):
+        with tempfile.TemporaryDirectory() as d:
+            cfg = Path(d, "c.json")
+            cfg.write_text(json.dumps({"models": {"x": {"cli": "m"}}, "cli_backend": {"command": ["c", "{prompt}"]}}), encoding="utf-8")
+            with mock.patch.dict(os.environ, {"QUOTEPROOF_CONFIG": str(cfg)}):
+                ayar.load(refresh=True)
+                self.assertIn("gerekmiyor", ayar.describe())
+                self.assertNotIn("EKSİK", ayar.describe())
+            ayar._cache.clear()
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)

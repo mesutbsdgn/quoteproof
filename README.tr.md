@@ -104,6 +104,7 @@ Her bulgu satırında dört öğe bulunur: **iddia**, **birebir alıntı**, **bu
 | `rapor_kontrol.py` | **Son raporu**, kaynak gösterdiği sayfalarla karşılaştırır: yanlış özneye bağlanmış sayıları, birebir olmayan alıntıları ve araştırma notlarında hiç geçmeyen kaynakları yakalar | 0 jeton |
 | `kapsama.py` | Planda listelenen beklenen anahtar olguları (`olgular`) doğrulanmış bulgularla karşılaştırır: "kapsama 9/12, eksik: …"; yalnız eksik olguları soran bir ek plan yazar | 0 jeton |
 | `destek.py` | Her notun **Özet ve Çıkarımlar cümlelerini** denetler: içlerindeki her somut öğe (sayı, tarih, `X25519` ya da `PEP 703` gibi tanımlayıcı, kısaltma) notun kendi alıntılarında ya da atıf yaptığı sayfalarda geçmeli; yalnız sayfada, yalnız başka sorunun sayfasında ya da hiçbir yerde olanları bildirir | 0 jeton |
+| `hakem.py` | **İsteğe bağlı, deneysel.** Alıntılarda geçen bir sayının cümlenin konusuna ait olup olmadığını küçük bir modele sorar; varsayılan kapalı, çağrı sınırlı, `judge_backend` ister | model jetonu |
 | `uzlas.py` | Aynı konunun birkaç bağımsız çalıştırmasının doğrulanmış notlarını birleştirir: hangi iddia kaç çalıştırmada bulundu, yalnız tek çalıştırmanın bulduğu ne, ve bulguları `[k/N çalıştırma]` taşıyan birleşik not | 0 jeton |
 | `rapor_olc.py` | İki raporu aynı ölçütlerle ölçer (sözcük, başlık, kaynak, boşluk) | 0 jeton |
 
@@ -187,6 +188,30 @@ Dosyada şunlar tanımlanır: modelleriniz, anahtarı tutan ortam değişkeninin
 - `"prompt_via": "stdin"` ayarında istem, komut satırı yerine standart girdiden verilir. Bu seçenek, stdin okuyan CLI'lar ve çok uzun istemler için uygundur.
 - Özel CLI'a yapılandırılmış anahtar aktarılmaz; CLI yalnızca izin verilen ortam değişkenlerini alır ve kendi oturumunu ya da yapılandırmasını kullanmalıdır. Bu arka uç için güvenlik sınırları [Sınırlar](#sınırlar) bölümündedir.
 - Dosya sırasıyla `QUOTEPROOF_CONFIG` ortam değişkeninde, skill klasöründeki `quoteproof.json` dosyasında ve `~/.config/quoteproof/config.json` yolunda aranır. Dosya git'e girmez.
+
+### Hangi kurulum bana yeter?
+
+Quoteproof belli bir sağlayıcıyı ya da bir ajan filosunu varsaymaz. Tek bir model hesabı yeter. Elinizdekine uyan satırı seçin:
+
+| Elinizde olan | Alt ajan arka ucu | Kurulum | Durum |
+|---|---|---|---|
+| **Yalnız Claude Code** | `claude -p` çalıştıran komut satırı arka ucu | `quoteproof.claude-only.example.json` dosyasını kopyalayın, `claude` ile bir kez giriş yapın; API anahtarı gerekmez | **Uçtan uca denendi** (bir konu, iki soru: 19 bulgunun 18'i doğrulandı, not sözleşmeyi ikinci denemede geçti) |
+| **Yalnız GPT/Codex benzeri bir CLI** | o CLI ile komut satırı arka ucu | aynı dosya, `command` değişir; CLI stdin okuyorsa `"format": "text"` ve `"prompt_via": "stdin"` kullanın | Aynı düzenek, **burada denenmedi** |
+| **Bir API hesabı** (Alibaba Cloud, OpenAI uyumlu, Ollama ve diğerleri) | çok sağlayıcı destekleyen OpenCode ya da komut satırı arka ucu | `quoteproof.example.json`: `models.*.opencode` = `SAĞLAYICI/MODEL`, anahtar ortam değişkeninde | OpenCode yolu **bir sağlayıcıyla denendi**, diğerleri denenmedi |
+| **Hiç model yok** | yok | başka yerde yazılmış herhangi bir yanıt üzerinde `dogrula.py`, `destek.py`, `rapor_kontrol.py` | Denendi; model yok, anahtar yok, 0 jeton |
+
+Bilmeniz gerekenler:
+- **Web araması alt ajanın parçasıdır.** Alt ajanın bir arama aracı olmalı. `claude -p` ile bu `WebSearch`/`WebFetch`, OpenCode ile yerleşik arama olur. Arama aracı olmayan bir model (örneğin düz bir Ollama modeli) alt ajan olamaz; yalnız aşağıdaki isteğe bağlı hakem olarak kullanılır.
+- **`"format": "text"` aramanın yapıldığını kanıtlayamaz.** Çıktı sözleşmesi yine not yapısını ve en az üç ayrı URL'yi şart koşar, doğrulayıcı da her alıntıyı sayfasında arar; ama bakılacak bir araç günlüğü yoktur.
+- **Tek sağlayıcı tam desteklenir.** Varsayılan zincir önce OpenCode'u, sonra komut satırı arka ucunu dener; yalnız biri tanımlıysa yalnız o kullanılır (`python3 scripts/ayar.py` neyin kullanılabildiğini gösterir).
+
+### İsteğe bağlı: birden çok ajan kullanıyorsanız
+
+Tek sağlayıcılı kurulumda bunların hiçbiri gerekmez. Birkaçı varsa şu eklentiler onları kullanır:
+
+- **Çalıştırma başına farklı alt ajan.** `--model AD` yapılandırmanızdaki bir modeli, `--arka opencode|cli` arka ucu seçer. Aynı konuyu iki ayrı modelle koşturup `uzlas.py` ile birleştirmek, tek modeli tekrarlamaktan daha bağımsız bir uzlaşı verir.
+- **Yedek zinciri.** `--arka otomatik` (varsayılan) önce OpenCode'u, sonra komut satırı arka ucunu dener.
+- **İsteğe bağlı hakem, `hakem.py`.** `destek.py` uydurma sayıyı, belge numarasını ve tarihi bedavaya bulur; ama *doğru* bir sayının *yanlış özneye* bağlandığını göremez. Sözcük örtüşmesine dayalı bir kural denendi ve kaldırıldı (kazanç yok, yanlış alarm). `hakem.py`, riskli her sayı için küçük bir modele tek soru sorar: "bu sayı, bu bulgu satırının anlattığı şeye mi ait?" Yalnız siz çağırınca çalışır, yalnız alıntılarda geçen sayılar için, çağrı sınırıyla; önce kaç çağrı yapılacağını gösteren bir `--kuru` kuru çalıştırması vardır. Yapılandırma dosyasında `judge_backend` altında ayarlanır: alt ajanla aynı komut olabilir (tek sağlayıcı) ya da farklı, daha ucuz bir model. Hakeme araç vermeyin. **Deneysel ve ölçüldüğü kadarıyla zayıf:** kayıtlı notlarda küçük, Claude dışı bir model doğru bağlanmış 87 sayının 4'üne yanlış dedi (yaklaşık %5 yanlış alarm); `destek.py`'nin kaçırdığı 6 enjekte takastan 1'ini işaretledi (anlamsız olanı), 5'ini geçirdi. Geçirdikleri çoğunlukla iki benzer belge numarası arasındaki takaslardı (PEP 779 ile PEP 703); kısa bir cümle bunları ayırt ettirmiyor. `hayır`ı kaynağı açma ipucu sayın, `evet`i asla kanıt saymayın. Varsayılan olarak kapalıdır ve hattın parçası değildir.
 
 ### Bir araştırma başlatın
 
@@ -327,7 +352,7 @@ Yazarın denemelerinde küçük bir konu, alt ajan başına yaklaşık 30 saniye
 ## Testler
 
 ```bash
-python3 arastir-ogren/scripts/test_arastir.py   # 210 test: ayrıştırma, sözleşme, devam, doğrulama, güven puanı, yapılandırma, MCP sunucusu
+python3 arastir-ogren/scripts/test_arastir.py   # 219 test: ayrıştırma, sözleşme, devam, doğrulama, güven puanı, yapılandırma, MCP sunucusu
 python3 arastir-ogren/scripts/test_oku.py       # 54 test: ayıklama, BM25, önbellek, SSRF, yönlendirme, robots.txt, PDF
 ```
 
@@ -340,7 +365,7 @@ arastir-ogren/            skill (~/.claude/skills/ altına kopyalayın ya da ba�
 ├── SKILL.md              koordinatör talimatları (Türkçe)
 ├── quoteproof.example.json   yapılandırma şablonu (~/.config/quoteproof/config.json olarak kopyalayın)
 ├── references/           alt ajan istemi, rapor şablonu, tasarımın dayandığı notlar
-└── scripts/              arastir · denetle · dogrula · destek · rapor_kontrol · oku · mcp_oku · guven · rapor_olc · ayar  (+ testler)
+└── scripts/              arastir · denetle · dogrula · destek · hakem · rapor_kontrol · oku · mcp_oku · guven · rapor_olc · ayar  (+ testler)
 assets/                   logo
 docs/fact-check/          bu README'nin doğrulaması (aşağıya bakın)
 ```

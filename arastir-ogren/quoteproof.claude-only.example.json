@@ -1,0 +1,13 @@
+{
+  "_comment": "Yalnız Claude Code (claude CLI) kullanan biri için: anahtar ve OpenCode gerekmez; claude CLI kendi oturumunu kullanır. Önce `claude` ile bir kez giriş yapın. Kopyalayın: ~/.config/quoteproof/config.json. 'haiku' yerine kendi hesabınızdaki model adını/takma adını yazabilirsiniz. Araç izni yalnız web araması ve sayfa okuma ile sınırlıdır. Bu kipte (format: text) araç kullanımı doğrulanamaz; sözleşme yalnız not biçimini ve URL sayısını denetler.",
+
+  "models": { "fast": { "cli": "haiku" } },
+  "default_model": "fast",
+  "api_key_env": null,
+
+  "cli_backend": {
+    "command": ["claude", "-p", "--model", "{model}", "--allowedTools", "WebSearch,WebFetch", "--output-format", "text"],
+    "format": "text",
+    "prompt_via": "stdin"
+  }
+}

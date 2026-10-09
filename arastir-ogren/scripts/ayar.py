@@ -16,6 +16,9 @@ Arama sırası (ilk bulunan kazanır):
                  responses-json: çıktı output[] (web_search_call / message) taşıyan JSON · text: standart çıktının TAMAMI nottur (ANSI renkleri atılır)
                  prompt_via: "arg" (varsayılan; istem komutta {prompt} yerine konur) | "stdin" (istem komutun standart girdisine yazılır; komutta {prompt} OLMAMALI)
 
+  judge_backend  (İSTEĞE BAĞLI, hakem.py için) cli_backend ile AYNI şema; ek olarak "model": komuttaki {model} değeri. Tanımsızsa hakem.py çalışmaz.
+                 Hakem komutuna ARAÇ/İZİN VERMEYİN: yalnız metin okuyup EVET/HAYIR yanıtlamalı (kaynaklardan gelen metin istemde veridir).
+
 Anahtar değerleri asla yazdırılmaz veya kaydedilmez; yalnız alt sürecin ortamına verilir.
 """
 import json
@@ -30,7 +33,7 @@ HERE = Path(__file__).resolve().parent
 SEARCH_PATHS = (HERE.parent / "quoteproof.json", Path.home() / ".config/quoteproof/config.json")
 CLI_FORMATS = ("responses-json", "text")
 CLI_PROMPT_VIA = ("arg", "stdin")
-DEFAULTS = {"models": {}, "default_model": None, "api_key_env": "LLM_API_KEY", "key_files": [], "runtime_env": {}, "cli_backend": None}
+DEFAULTS = {"models": {}, "default_model": None, "api_key_env": "LLM_API_KEY", "key_files": [], "runtime_env": {}, "cli_backend": None, "judge_backend": None}
 _cache = {}
 
 
@@ -49,6 +52,24 @@ def config_path():
     return None
 
 
+def _validate_cli(name, cli):
+    if cli is None:
+        return
+    if not (isinstance(cli, dict) and isinstance(cli.get("command"), list) and cli["command"]
+            and all(isinstance(a, str) for a in cli["command"])):
+        raise ConfigError(f"{name}.command boş olmayan bir metin listesi olmalı")
+    if cli.get("format", "responses-json") not in CLI_FORMATS:
+        raise ConfigError(f"{name}.format şunlardan biri olmalı: {', '.join(CLI_FORMATS)}")
+    via = cli.get("prompt_via", "arg")
+    if via not in CLI_PROMPT_VIA:
+        raise ConfigError(f"{name}.prompt_via şunlardan biri olmalı: {', '.join(CLI_PROMPT_VIA)}")
+    has_placeholder = any("{prompt}" in a for a in cli["command"])
+    if via == "arg" and not has_placeholder:
+        raise ConfigError(f"{name}.prompt_via=\"arg\" iken komutta {{prompt}} yer tutucusu olmalı (ya da prompt_via=\"stdin\" seçin)")
+    if via == "stdin" and has_placeholder:
+        raise ConfigError(f"{name}.prompt_via=\"stdin\" iken komutta {{prompt}} OLMAMALI (istem standart girdiden gider)")
+
+
 def _validate(cfg):
     models = cfg.get("models")
     if not isinstance(models, dict):
@@ -64,21 +85,11 @@ def _validate(cfg):
         raise ConfigError("key_files liste, runtime_env nesne olmalı")
     if not all(isinstance(k, str) and isinstance(v, str) for k, v in cfg["runtime_env"].items()):
         raise ConfigError("runtime_env değerleri metin olmalı")
-    cli = cfg.get("cli_backend")
-    if cli is not None and not (isinstance(cli, dict) and isinstance(cli.get("command"), list) and cli["command"]
-                                and all(isinstance(a, str) for a in cli["command"])):
-        raise ConfigError("cli_backend.command boş olmayan bir metin listesi olmalı")
-    if cli is not None and cli.get("format", "responses-json") not in CLI_FORMATS:
-        raise ConfigError(f"cli_backend.format şunlardan biri olmalı: {', '.join(CLI_FORMATS)}")
-    if cli is not None:
-        via = cli.get("prompt_via", "arg")
-        if via not in CLI_PROMPT_VIA:
-            raise ConfigError(f"cli_backend.prompt_via şunlardan biri olmalı: {', '.join(CLI_PROMPT_VIA)}")
-        has_placeholder = any("{prompt}" in a for a in cli["command"])
-        if via == "arg" and not has_placeholder:
-            raise ConfigError("cli_backend.prompt_via=\"arg\" iken komutta {prompt} yer tutucusu olmalı (ya da prompt_via=\"stdin\" seçin)")
-        if via == "stdin" and has_placeholder:
-            raise ConfigError("cli_backend.prompt_via=\"stdin\" iken komutta {prompt} OLMAMALI (istem standart girdiden gider)")
+    _validate_cli("cli_backend", cfg.get("cli_backend"))
+    judge = cfg.get("judge_backend")
+    _validate_cli("judge_backend", judge)
+    if judge is not None and not (isinstance(judge.get("model", ""), str)):
+        raise ConfigError("judge_backend.model metin olmalı")
 
 
 def load(refresh=False):
@@ -173,12 +184,34 @@ def cli_format():
     return cli.get("format", "responses-json")
 
 
+def _fill(cli, model, prompt, timeout):
+    subs = {"{model}": model, "{prompt}": prompt, "{timeout}": str(timeout)}
+    token_re = re.compile("|".join(re.escape(t) for t in subs))
+    return [token_re.sub(lambda m: subs[m.group(0)], arg) for arg in cli["command"]]
+
+
+def judge_command(prompt, timeout):
+    """judge_backend.command şablonunu doldurur; tanımsızsa None."""
+    judge = load()["judge_backend"]
+    return _fill(judge, judge.get("model", ""), prompt, timeout) if judge else None
+
+
+def judge_prompt_via():
+    return (load()["judge_backend"] or {}).get("prompt_via", "arg")
+
+
+def uses_opencode():
+    """Yapılandırmadaki herhangi bir model OpenCode kimliği taşıyor mu? (Yalnız cli kullananlar anahtar tanımlamak zorunda değildir.)"""
+    return any(isinstance(v, dict) and v.get("opencode") for v in load()["models"].values())
+
+
 def describe():
     """Bir satırlık durum (anahtar değeri YOK)."""
     path = config_path()
     cfg = load()
     return (f"yapılandırma: {path or 'yok (varsayılanlar)'} · modeller: {', '.join(model_names()) or 'tanımsız'} · "
-            f"anahtar: {'tamam' if (api_key() or not needs_key()) else 'EKSİK'} · cli arka ucu: {'var' if cfg['cli_backend'] else 'yok'}")
+            f"anahtar: {('tamam' if (api_key() or not needs_key()) else 'EKSİK') if uses_opencode() else 'gerekmiyor (yalnız cli arka ucu)'} · "
+            f"cli arka ucu: {'var' if cfg['cli_backend'] else 'yok'} · hakem: {'var' if cfg['judge_backend'] else 'yok'}")
 
 
 if __name__ == "__main__":

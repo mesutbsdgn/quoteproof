@@ -104,6 +104,7 @@ Each finding line carries **the claim**, **a verbatim quote**, **a URL of its ow
 | `rapor_kontrol.py` | Checks the **final report** against the pages it cites: catches numbers pinned to the wrong subject, quotes that are not verbatim, citations that never appeared in the research notes | 0 tokens |
 | `kapsama.py` | Checks the expected key facts listed in the plan (`olgular`) against the verified findings: "coverage 9/12, missing: …", and writes a follow-up plan that asks only for the missing facts | 0 tokens |
 | `destek.py` | Checks the **Summary and Inferences sentences** of each note: every concrete item in them (number, date, identifier such as `X25519` or `PEP 703`, acronym) must appear in the note's own quotes or on the pages it cites; reports what is only on a page, only on another question's page, or nowhere | 0 tokens |
+| `hakem.py` | **Optional, experimental.** Asks a small model whether a number that appears in the quotes belongs to the subject of the sentence; off by default, call-limited, needs `judge_backend` | model tokens |
 | `uzlas.py` | Merges the verified notes of several independent runs of the same topic: which claims were found in how many runs, what only one run found, and a merged note whose findings carry `[k/N çalıştırma]` (k of N runs) | 0 tokens |
 | `rapor_olc.py` | Measures two reports with the same yardstick (words, headings, sources, gaps) | 0 tokens |
 
@@ -187,6 +188,30 @@ The file names your models, the *name* of the environment variable that holds yo
 - With `"prompt_via": "stdin"` the prompt is piped to the command's standard input instead of the command line, which suits CLIs that read stdin and very long prompts.
 - The configured key is not passed to a custom CLI. The CLI receives only allow-listed environment variables and must use its own session or configuration. Its security limits are listed under [Limitations](#limitations).
 - The file is looked up in `QUOTEPROOF_CONFIG`, then `quoteproof.json` in the skill folder, then `~/.config/quoteproof/config.json`. It is git-ignored.
+
+### Which setup do I need?
+
+Quoteproof does not assume any particular provider or a fleet of agents. One model account is enough. Pick the row that matches what you have:
+
+| You have | Worker back-end | Setup | Status |
+|---|---|---|---|
+| **Only Claude Code** | command-line back-end running `claude -p` | copy `quoteproof.claude-only.example.json`, log in to `claude` once; no API key | **Tested end to end** (one topic, two questions: 18 of 19 findings verified, the note passed the contract on the second attempt) |
+| **Only a GPT/Codex-style CLI** | command-line back-end with that CLI | same file, replace `command`; use `"format": "text"` and `"prompt_via": "stdin"` if the CLI reads stdin | Same mechanism, **not tested here** |
+| **An API account** (Alibaba Cloud, OpenAI-compatible, Ollama and others) | OpenCode, which supports many providers, or a command-line back-end | `quoteproof.example.json`: `models.*.opencode` = `PROVIDER/MODEL`, key in an environment variable | OpenCode path **tested with one provider**; others not tested |
+| **No model at all** | none | `dogrula.py`, `destek.py`, `rapor_kontrol.py` on any answer written elsewhere | Tested; no model, no key, 0 tokens |
+
+Things to know:
+- **Web search is part of the worker.** The worker needs a search tool. With `claude -p` it is `WebSearch`/`WebFetch`; with OpenCode it is its built-in search. A model without a search tool cannot be a worker (a plain Ollama model, for example); use it only as the optional referee below.
+- **`"format": "text"` cannot prove that a search happened.** The output contract still requires the note structure and at least three distinct URLs, and the verifier then checks every quote against its page, but there is no tool log to inspect.
+- **One provider is fully supported.** The default chain tries OpenCode first and the command-line back-end second; if only one is configured, only that one is used (`python3 scripts/ayar.py` shows what is available).
+
+### Optional: if you use more than one agent
+
+Nothing here is needed for a single-provider setup. If you do have several, these add-ons use them:
+
+- **A different worker per run.** `--model NAME` picks a model from your config; `--arka opencode|cli` picks the back-end. Running the same topic on two different models and merging with `uzlas.py` gives a more independent consensus than repeating one model.
+- **A fallback chain.** `--arka otomatik` (default) tries OpenCode, then the command-line back-end.
+- **An optional referee, `hakem.py`.** `destek.py` finds invented numbers, document numbers and dates for free, but it cannot tell that a *correct* number was attached to the *wrong subject*. A word-overlap rule was tried and removed (no gain, false alarms). `hakem.py` asks a small model one question per risky number: "does this number belong to what this finding line describes?" It runs only when you call it, only for numbers that appear in the quotes, with a call limit and a `--kuru` dry run that shows the number of calls first. Configure it under `judge_backend` in the config file: it can be the same command as the worker (single provider) or a different, cheaper model. Give the referee no tools. **Experimental, and measured weak:** on the saved notes a small non-Claude model judged 87 correctly-attached numbers and called 4 of them wrong (about 5% false alarms), and of the 6 injected swaps that `destek.py` misses it flagged 1 (a nonsense one) and passed 5, mostly swaps between two similar document numbers (PEP 779 and PEP 703) that a short sentence does not disambiguate. Treat a `hayır` as a hint to open the source, never a `evet` as proof. It is off by default and not part of the pipeline.
 
 ### Run a research
 
@@ -321,7 +346,7 @@ In the author's runs, a small topic takes about 30 seconds per worker, and the a
 ## Tests
 
 ```bash
-python3 arastir-ogren/scripts/test_arastir.py   # 210 tests: parsing, contract, resume, verification, trust score, config, MCP server
+python3 arastir-ogren/scripts/test_arastir.py   # 219 tests: parsing, contract, resume, verification, trust score, config, MCP server
 python3 arastir-ogren/scripts/test_oku.py       # 54 tests: extraction, BM25, cache, SSRF, redirects, robots.txt, PDF
 ```
 
@@ -334,7 +359,7 @@ arastir-ogren/            the skill (copy or symlink into ~/.claude/skills/)
 ├── SKILL.md              coordinator instructions (Turkish)
 ├── quoteproof.example.json   configuration template (copy to ~/.config/quoteproof/config.json)
 ├── references/           worker prompt, report template, notes behind the design
-└── scripts/              arastir · denetle · dogrula · destek · rapor_kontrol · oku · mcp_oku · guven · rapor_olc · ayar  (+ tests)
+└── scripts/              arastir · denetle · dogrula · destek · hakem · rapor_kontrol · oku · mcp_oku · guven · rapor_olc · ayar  (+ tests)
 assets/                   logo
 docs/fact-check/          the fact-check of this README (see below)
 ```
