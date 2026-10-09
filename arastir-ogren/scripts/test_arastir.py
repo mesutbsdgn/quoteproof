@@ -39,7 +39,7 @@ def ev(kind, **part):
 
 
 GOOD_NOTE = ("# k\n\n## s?\n### Özet\nx\n### Alıntılı bulgular\n"
-             + "".join(f"- olgu {i} \"exact sentence {i} from page\" — [K{i}](https://x.y/z{i})\n" for i in range(1, 9))) + "satır\n" * 80
+             + "".join(f"- olgu {i} \"exact sentence {i} from page\" — [K{i}](https://x.y/z{i})\n" for i in range(1, 9))) + "satır\n" * 80 + "### Çıkarımlar\n—\n### Boşluklar\n—\n"
 
 
 class OpenCodeParse(unittest.TestCase):
@@ -55,6 +55,51 @@ class OpenCodeParse(unittest.TestCase):
         self.assertEqual(r["araclar"], {"websearch": 1})
         self.assertEqual(r["jeton"], [160, 10])
         self.assertTrue(r["tamam"])
+
+    def test_adim_profili_yalniz_metrikleri_tutar(self):
+        out = "\n".join([
+            ev("step_start"), ev("text", text="Gizli sayfa içeriği"),
+            ev("tool_use", tool="oku_sayfa_oku", state={"input": {"url": "https://gizli.example/"}}),
+            ev("step_finish", reason="tool-calls", tokens={"input": 20, "output": 3, "cache": {"read": 10}}),
+            ev("step_start"), ev("text", text="Nihai not"),
+            ev("step_finish", reason="stop", tokens={"input": 4, "output": 5, "reasoning": 2, "cache": {"read": 30}}),
+        ])
+        r = arastir.parse_opencode_events(out)
+        self.assertEqual([s["neden"] for s in r["adimlar"]], ["tool-calls", "stop"])
+        self.assertEqual(r["adimlar"][0]["araclar"], {"oku_sayfa_oku": 1})
+        self.assertEqual(sum(s["taze"] + s["onbellek"] for s in r["adimlar"]), r["jeton"][0])
+        self.assertEqual(sum(s["cikti"] + s["akil"] for s in r["adimlar"]), r["jeton"][1])
+        self.assertNotIn("Gizli sayfa içeriği", json.dumps(r["adimlar"]))
+        self.assertNotIn("gizli.example", json.dumps(r["adimlar"]))
+
+    def test_zaman_asimi_adim_profili_kaybolmaz(self):
+        out = "\n".join([
+            ev("step_start"), ev("tool_use", tool="oku_sayfada_ara"),
+            ev("step_finish", reason="tool-calls", tokens={"input": 2, "cache": {"read": 12}}),
+            ev("step_start"), ev("tool_use", tool="oku_sayfa_oku"),
+        ])
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(arastir, "run_cmd", return_value=(124, out, "", True)), \
+             mock.patch.object(arastir, "opencode_argv", return_value=["opencode"]):
+            note = Path(d) / "n.md"
+            r = arastir.work_opencode("P", note, Path(d), "fast", "dusuk", 10, False)
+        self.assertEqual(r["rc"], 6)
+        self.assertEqual(len(r["adimlar"]), 2)
+        self.assertEqual(r["adimlar"][-1]["neden"], None)
+        self.assertEqual(r["adimlar"][0]["onbellek"], 12)
+        self.assertFalse(note.exists())
+
+    def test_isci_zaman_asiminda_profili_denemeye_yazar(self):
+        profile = [{"adim": 1, "araclar": {"oku_sayfa_oku": 1}, "neden": "tool-calls",
+                    "taze": 2, "onbellek": 12, "cikti": 1, "akil": 0}]
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(arastir, "work_opencode", return_value={
+                "rc": 6, "hata": "OpenCode zaman aşımı", "jeton": [14, 1], "araclar": {"oku_sayfa_oku": 1},
+                "ayrinti": {"taze": 2, "onbellek": 12, "cikti": 1, "akil": 0}, "adimlar": profile}):
+            base = Path(d)
+            (base / "notlar").mkdir()
+            args = mock.Mock(arka="opencode", sure=10, model="fast", efor="dusuk", arama_yok=True, okuyucu="mcp")
+            r = arastir.run_worker({"slug": "a", "konu": "k", "sorular": ["s?"]}, base, args, sequence=["opencode"])
+        self.assertFalse(r["ok"])
+        self.assertEqual(r["denemeler"][0]["adimlar"], profile)
 
     def test_adim_sinirinda_kesilen_akis_nihai_cevap_sayilmaz(self):
         # Son adım araç çağrısıyla bitti ("tool-calls"): ara düşünce metni rapor notu olarak yazılmamalı.
@@ -520,6 +565,33 @@ class DogrulaCoverage(unittest.TestCase):
 
 
 class DenetleFixes(unittest.TestCase):
+    def test_planlanan_tek_yayimlayici_iki_belgede_bilgi_uyarisi(self):
+        row = {"dosya": "rfc.md", "urls": ["https://www.rfc-editor.org/rfc/rfc9110.html#section-15.4.5",
+                                               "https://www.rfc-editor.org/rfc/rfc9111.html"],
+               "sorunlar": [], "bos": False, "bulgu": 3, "devralan": 0, "aramasiz": False,
+               "kaynaksiz": [], "findings": []}
+        with mock.patch.object(denetle, "trust_section", return_value=[]):
+            planned = denetle.render([row], {}, [], False, publishers={"rfc": "rfc-editor.org"})
+            open_ended = denetle.render([row], {}, [], False)
+            wrong_host = denetle.render([row], {}, [], False, publishers={"rfc": "ietf.org"})
+            one_document = denetle.render([{**row, "urls": row["urls"][:1]}], {}, [], False,
+                                          publishers={"rfc": "rfc-editor.org"})
+        self.assertNotIn("tüm kaynaklar tek alan adı", planned)
+        self.assertIn("2 farklı belge, 1 alan adı", planned)
+        for report in (open_ended, wrong_host, one_document):
+            self.assertIn("tüm kaynaklar tek alan adı", report)
+
+    def test_yayimlayici_alan_adi_plan_dogrulamasi(self):
+        base = {"slug": "rfc", "konu": "HTTP", "sorular": ["Nedir?"]}
+        self.assertEqual(arastir.validate([{**base, "single_publisher_host": "rfc-editor.org"}]), [])
+        with tempfile.TemporaryDirectory() as d:
+            plan = Path(d) / "PLAN.json"
+            plan.write_text(json.dumps([{**base, "single_publisher_host": "rfc-editor.org"}]), encoding="utf-8")
+            self.assertEqual(denetle.planned_publishers(plan), {"rfc": "rfc-editor.org"})
+        for value in ("https://rfc-editor.org", "localhost", "127.0.0.1", "rfc-editor.org:443", "RFC-EDITOR.ORG", 2):
+            self.assertTrue(any("single_publisher_host" in e for e in
+                                arastir.validate([{**base, "single_publisher_host": value}])))
+
     def test_parantezli_url_numarali_madde_ve_soru_basina_devralma(self):
         note = ("# k\n## Soru 1\n### Alıntılı bulgular\n"
                 "- Birinci \"exact quote that is long\" — [A](https://a.example/x_(y))\n"
@@ -550,6 +622,34 @@ class DenetleFixes(unittest.TestCase):
 
 
 class McpRobust(unittest.TestCase):
+    def test_hafif_okuma_butcesi_ag_cagrisini_keser(self):
+        import mcp_oku
+        req = {"id": 1, "method": "tools/call", "params": {"name": "sayfa_oku", "arguments": {"url": "https://example.org/x"}}}
+        old_count = mcp_oku._READ_CALLS
+        try:
+            mcp_oku._READ_CALLS = 0
+            with mock.patch.dict(os.environ, {"OKU_CAGRI_BUTCE": "2"}), mock.patch.object(mcp_oku, "call_tool", return_value=("ok", False)) as read:
+                mcp_oku.handle({"id": 2, "method": "tools/list"})
+                self.assertFalse(mcp_oku.handle(req)["result"]["isError"])
+                self.assertFalse(mcp_oku.handle(req)["result"]["isError"])
+                blocked = mcp_oku.handle(req)["result"]
+                self.assertTrue(blocked["isError"])
+                self.assertIn("bütçesi doldu", blocked["content"][0]["text"])
+                self.assertEqual(read.call_count, 2)
+            mcp_oku._READ_CALLS = 0
+            with mock.patch.dict(os.environ, {"OKU_CAGRI_BUTCE": ""}, clear=False), mock.patch.object(mcp_oku, "call_tool", return_value=("ok", False)) as read:
+                self.assertTrue(mcp_oku.handle(req)["result"]["isError"])
+                self.assertEqual(read.call_count, 0)
+            mcp_oku._READ_CALLS = 0
+            with mock.patch.dict(os.environ, {"OKU_CAGRI_BUTCE": "2"}, clear=False):
+                os.environ.pop("OKU_CAGRI_BUTCE")
+                with mock.patch.object(mcp_oku, "call_tool", return_value=("ok", False)) as read:
+                    for _ in range(3):
+                        self.assertFalse(mcp_oku.handle(req)["result"]["isError"])
+                    self.assertEqual(read.call_count, 3)
+        finally:
+            mcp_oku._READ_CALLS = old_count
+
     def test_bozuk_girdiler_cokmez_ve_protokol_hatasi_doner(self):
         import mcp_oku
         self.assertEqual(mcp_oku.handle([1])["error"]["code"], -32600)
@@ -598,6 +698,41 @@ class ContractHardening(unittest.TestCase):
     def test_iyi_not_gecer(self):
         self.assertTrue(arastir.check_contract(GOOD_NOTE)[0])
 
+    def test_plan_sorulari_dort_bolumle_uyusur(self):
+        self.assertTrue(arastir.check_contract(GOOD_NOTE, expected_questions=1)[0])
+        self.assertFalse(arastir.check_contract(GOOD_NOTE, expected_questions=2)[0])
+        more = ("\n## s2?\n### Özet\n—\n### Alıntılı bulgular\n—\n### Çıkarımlar\n—\n### Boşluklar\n—\n"
+                "\n## s3?\n### Özet\n—\n### Alıntılı bulgular\n—\n### Çıkarımlar\n—\n### Boşluklar\n—\n")
+        self.assertTrue(arastir.check_contract(GOOD_NOTE + more, expected_questions=3)[0])
+
+    def test_eksik_bolum_ve_ek_baslik_basarili_sayilmaz(self):
+        missing = GOOD_NOTE.replace("### Boşluklar\n—\n", "")
+        ok, why = arastir.check_contract(missing, expected_questions=1)
+        self.assertFalse(ok)
+        self.assertIn("Boşluklar", why)
+        extra = GOOD_NOTE + "\n## Notlar (normatif sözcük ayrımı)\nAçıklama.\n"
+        ok, why = arastir.check_contract(extra, expected_questions=1)
+        self.assertFalse(ok)
+        self.assertIn("2 soru bölümü", why)
+        with tempfile.TemporaryDirectory() as d:
+            note = Path(d) / "note.md"
+            note.write_text(extra, encoding="utf-8")
+            self.assertEqual(len(denetle.parse_note(note)[1]), 2)
+
+    def test_isci_ek_baslikli_notu_hatali_dizine_tasir(self):
+        def fake(prompt_text, note, *a, **k):
+            note.write_text(GOOD_NOTE + "\n## Notlar\nEk açıklama\n", encoding="utf-8")
+            return {"rc": 0, "araclar": {"oku_sayfa_oku": 1}}
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(arastir, "work_opencode", side_effect=fake):
+            base = Path(d)
+            (base / "notlar").mkdir()
+            args = mock.Mock(arka="opencode", sure=10, model="fast", efor="dusuk", arama_yok=True, okuyucu="mcp")
+            result = arastir.run_worker({"slug": "a", "konu": "k", "sorular": ["s?"]}, base, args, sequence=["opencode"])
+            self.assertFalse(result["ok"])
+            self.assertEqual(result["rc"], 9)
+            self.assertFalse((base / "notlar" / "a.md").exists())
+            self.assertTrue((base / "hatali" / "a.deneme1.md").exists())
+
     def test_arama_araci_cagrilmadiysa_opencode_notu_reddedilir(self):
         calls = []
         def fake(prompt_text, note, *a, **k):
@@ -638,6 +773,35 @@ class RateLimitChain(unittest.TestCase):
         self.assertEqual(calls, ["opencode"])               # ikinci opencode denemesi ATLANDI
         self.assertEqual((res["ok"], res["arka"]), (True, "cli"))
         self.assertEqual(res["denemeler"][0]["rc"], 10)
+
+    def test_kaynak_notundaki_429_ayni_arka_ucta_yeniden_denenir(self):
+        calls = []
+        note_text = (
+            "# robots.txt HTTP davranışı\n\n## Soru\n4xx ve 5xx yanıtlarının etkisi.\n"
+            "### Alıntılı bulgular\n"
+            '- Google davranışı: "Google\'s crawlers treat all `4xx` errors, except `429`, as if a valid robots.txt file didn\'t exist." — '
+            "[Google](https://developers.google.com/search/docs/crawling-indexing/robots/robots_txt)\n"
+            '- RFC 9309 tanımı: "For example, in the context of HTTP, such status codes are in the range 400-499." — '
+            "[RFC](https://www.rfc-editor.org/rfc/rfc9309)\n"
+            "### Özet\nGoogle'ın robots.txt belgesi 4xx yanıtlarını geçerli dosya yokmuş gibi ele alır; RFC 9309 ise HTTP 4xx aralığını tanımlar. "
+            "Bu not iki ayrı birincil kaynağa dayanır, ancak arama sözleşmesindeki üç benzersiz URL eşiğini karşılamaz.\n"
+            "### Çıkarımlar\n—\n### Boşluklar\n—\n"
+        )
+        def fake(prompt_text, note, *a, **k):
+            calls.append("opencode")
+            note.write_text(note_text)
+            return {"rc": 0, "araclar": {"websearch": 1}}
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(arastir, "work_opencode", side_effect=fake), \
+             mock.patch.object(arastir, "work_cli", side_effect=lambda *a, **k: (a[1].write_text(GOOD_NOTE), {"rc": 0})[1]), \
+             mock.patch.object(arastir.time, "sleep"):
+            base = Path(d); (base / "istemler").mkdir(); (base / "notlar").mkdir()
+            args = mock.Mock(arka="otomatik", sure=60, model="fast", efor="dusuk", arama_yok=False, okuyucu="mcp")
+            res = arastir.run_worker({"slug": "a", "konu": "k", "sorular": ["s?"]}, base, args, 0, ["opencode", "opencode", "cli"])
+        self.assertEqual(calls, ["opencode", "opencode"])
+        self.assertTrue(res["ok"])
+        self.assertEqual([d["rc"] for d in res["denemeler"]], [9, 9, 0])
+        self.assertNotIn("hız sınırı", res["denemeler"][0]["hata"])
+        self.assertIn("yalnız 2 benzersiz URL", res["denemeler"][0]["hata"])
 
     def test_genis_konu_uyarisi(self):
         plan = [{"slug": "dar", "konu": "Türkiye ve Çin İHA vizyonu"},
@@ -689,6 +853,46 @@ class Resume(unittest.TestCase):
             calls.clear()
             self._main(d, ["--devam"], fake)
         self.assertEqual(calls, ["a"])
+
+    def test_ek_baslikli_not_devamda_yeniden_uretilir(self):
+        calls = []
+        def fake(item, base, args, delay=0.0, sequence=None):
+            calls.append(item["slug"])
+            (base / "notlar" / f"{item['slug']}.md").write_text(GOOD_NOTE)
+            return {"slug": item["slug"], "ok": True, "deneme": 1, "arka": "cli", "rc": 0, "hata": "", "bayt": len(GOOD_NOTE),
+                    "sure_sn": 1, "denemeler": [], "jeton": [1, 1], "araclar": {}}
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / "PLAN.json").write_text(json.dumps([{"slug": "a", "konu": "k", "sorular": ["s?"]}]), encoding="utf-8")
+            self._main(d, [], fake)
+            (Path(d) / "notlar" / "a.md").write_text(GOOD_NOTE + "\n## Notlar\nEk açıklama\n")
+            calls.clear()
+            self._main(d, ["--devam"], fake)
+        self.assertEqual(calls, ["a"])
+
+    def test_devam_dar_konu_icin_iki_url_notunu_korur(self):
+        item = {"slug": "dar", "konu": "k", "sorular": ["s?"], "min_url_required": 2}
+        note = (
+            "# k\n\n## Soru\nBirincil kaynaklarla yanıt.\n### Alıntılı bulgular\n"
+            '- Kaynak bir — "The specification defines this behavior for the service." — [RFC](https://rfc.example/spec)\n'
+            '- Kaynak iki — "The service documentation confirms the same behavior." — [Docs](https://docs.example/behavior)\n'
+            "### Özet\nİki ayrı kaynak aynı davranışı doğruluyor. Bu dar soruda iki ayrı URL yeterli kabul edilecek; kanıtlar doğrudan alıntılanmış ve URL ile ilişkilendirilmiştir. "
+            "Sentez bu iki kaynağın söylediği kapsamla sınırlıdır.\n"
+            "### Çıkarımlar\n—\n### Boşluklar\n—\n"
+        )
+        template = arastir.load_template()
+        digest = arastir.hashlib.sha256(arastir.render(item, template, arastir.OKUMA_GENEL, False).encode("utf-8")).hexdigest()[:16]
+        with tempfile.TemporaryDirectory() as d:
+            Path(d, "PLAN.json").write_text(json.dumps([item]), encoding="utf-8")
+            Path(d, "notlar").mkdir()
+            Path(d, "notlar", "dar.md").write_text(note, encoding="utf-8")
+            Path(d, "calisma.json").write_text(json.dumps([{"slug": "dar", "ok": True, "hash": digest}]), encoding="utf-8")
+            calls = []
+            def fake(*args, **kwargs):
+                calls.append("worker")
+                return {"slug": "dar", "ok": True, "deneme": 1, "arka": "cli", "rc": 0, "hata": "", "bayt": len(note),
+                        "sure_sn": 1, "denemeler": [], "jeton": [0, 0], "araclar": {}}
+            self.assertEqual(self._main(d, ["--devam"], fake), 0)
+            self.assertEqual(calls, [])
 
 
 class Guven(unittest.TestCase):
@@ -1292,10 +1496,19 @@ class RaporKontrol(unittest.TestCase):
         good = page + " the quick brown fox jumps over the lazy dog today. "
         self.assertEqual(self._kinds(self._run(q, self._pages(**{"https://a.example/p": good}))), [])
 
-    def test_okunamayan_sayfa_sessiz_kalir_ve_raporlanir(self):
+    def test_okunamayan_sayfa_denetlenemedi_uyarisi_verir(self):
         res = self._run("- Maliyet $4500 [U](https://olu.example/p)\n", self._pages())
         self.assertEqual(self._kinds(res), [])
         self.assertEqual(res["okunamayan"], ["https://olu.example/p"])
+        self.assertEqual([(f["seviye"], f["tur"]) for f in res["ekstra"]], [("uyarı", "kaynak-okunamadı")])
+
+    def test_ceviri_tirnakliysa_hata_ozgun_alinti_gecer(self):
+        url = "https://a.example/p"
+        page = "A 304 response is terminated by the end of the header section; it cannot contain content or trailers. " + self.FILL
+        translated = self._run(f'- "304 yanıtı başlıkların sonunda biter" — [RFC]({url})\n', self._pages(**{url: page}))
+        original = self._run(f'- "A 304 response is terminated by the end of the header section" — [RFC]({url})\n', self._pages(**{url: page}))
+        self.assertEqual(self._kinds(translated), [("hata", "alıntı-yok")])
+        self.assertEqual(self._kinds(original), [])
 
     def test_notlarda_olmayan_url_ve_zayif_kaynak(self):
         page = "icerik " * 50
@@ -1322,6 +1535,11 @@ class RaporKontrol(unittest.TestCase):
                     self.assertEqual(rapor_kontrol.main(), 0)                  # varsayılan: bulgu olsa da 0
                 with mock.patch.object(sys, "argv", ["rapor_kontrol.py", str(rp), "--siki"]):
                     self.assertEqual(rapor_kontrol.main(), 1)
+            rp.write_text('- "alıntı" [U](https://olu.example/p)\n', encoding="utf-8")
+            with mock.patch.object(rapor_kontrol.oku, "load", return_value={"ok": False, "markdown": "", "hata": "HTTP 429"}), \
+                 mock.patch.object(sys, "argv", ["rapor_kontrol.py", str(rp), "--siki"]), \
+                 contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(rapor_kontrol.main(), 1)
             self.assertTrue((Path(d) / "rapor-kontrol.md").exists() and (Path(d) / "rapor-kontrol.json").exists())
             with mock.patch.object(sys, "argv", ["rapor_kontrol.py", str(Path(d) / "yok.md")]):
                 self.assertEqual(rapor_kontrol.main(), 2)
@@ -1510,15 +1728,48 @@ class PlanMinUrl(unittest.TestCase):
             errs = arastir.validate([{"slug": "a", "konu": "k", "sorular": ["s?"], "min_url": bad}])
             self.assertTrue(any("min_url" in e for e in errs), bad)
 
+    def test_min_url_required_iki_url_istisnasi_ve_sinirlar(self):
+        ok = [{"slug": "a", "konu": "k", "sorular": ["s?"], "min_url_required": 2}]
+        self.assertEqual(arastir.validate(ok), [])
+        for bad in (1, 31, "2", True, 4.5):
+            errs = arastir.validate([{"slug": "a", "konu": "k", "sorular": ["s?"], "min_url_required": bad}])
+            self.assertTrue(any("min_url_required" in e for e in errs), bad)
+
+    def test_worker_dar_konu_icin_iki_url_kabul_esigini_kullanir(self):
+        note_text = (
+            "# k\n\n## Soru\nBirincil kaynaklarla yanıt.\n### Alıntılı bulgular\n"
+            '- Kaynak bir — "The specification defines this behavior for the service." — [RFC](https://rfc.example/spec)\n'
+            '- Kaynak iki — "The service documentation confirms the same behavior." — [Docs](https://docs.example/behavior)\n'
+            "### Özet\nİki ayrı kaynak aynı davranışı doğruluyor. Bu dar soruda iki ayrı URL yeterli kabul edilecek; kanıtlar doğrudan alıntılanmış ve URL ile ilişkilendirilmiştir. "
+            "Sentez bu iki kaynağın söylediği kapsamla sınırlıdır.\n"
+            "### Çıkarımlar\n—\n### Boşluklar\n—\n"
+        )
+        def run(item):
+            def fake(prompt_text, note, *a, **k):
+                note.write_text(note_text)
+                return {"rc": 0, "araclar": {"oku_sayfa_oku": 2}}
+            with tempfile.TemporaryDirectory() as d, mock.patch.object(arastir, "work_opencode", side_effect=fake):
+                base = Path(d); (base / "istemler").mkdir(); (base / "notlar").mkdir()
+                args = mock.Mock(arka="opencode", sure=60, model="fast", efor="dusuk", arama_yok=True, okuyucu="mcp")
+                return arastir.run_worker(item, base, args, 0, ["opencode"])
+
+        default = run({"slug": "a", "konu": "k", "sorular": ["s?"]})
+        narrow = run({"slug": "a", "konu": "k", "sorular": ["s?"], "min_url_required": 2})
+        self.assertFalse(default["ok"])
+        self.assertEqual(default["denemeler"][0]["rc"], 9)
+        self.assertTrue(narrow["ok"])
+        self.assertEqual(narrow["denemeler"][0]["rc"], 0)
+
     def test_zayif_not_esigi_konu_basinadir(self):
         def note(n):
             return "# k\n## S\n### Alıntılı bulgular\n" + "".join(f"- b — \"q{i} long enough\" — [U](https://s{i}.example/x)\n" for i in range(n))
         with tempfile.TemporaryDirectory() as d:
             base = Path(d); (base / "notlar").mkdir()
             (base / "notlar" / "dar.md").write_text(note(4)); (base / "notlar" / "genis.md").write_text(note(4))
-            results = [{"slug": "dar", "ok": True}, {"slug": "genis", "ok": True}]
-            plan = [{"slug": "dar", "min_url": 3}, {"slug": "genis"}]
-            self.assertEqual(arastir.weak_notes(base, results, plan), ["genis"])      # dar: 4 ≥ 3 → zayıf değil; genis: 4 < 8 → zayıf
+            (base / "notlar" / "iki-kaynak.md").write_text(note(2))
+            results = [{"slug": "dar", "ok": True}, {"slug": "genis", "ok": True}, {"slug": "iki-kaynak", "ok": True}]
+            plan = [{"slug": "dar", "min_url": 3}, {"slug": "genis"}, {"slug": "iki-kaynak", "min_url_required": 2}]
+            self.assertEqual(arastir.weak_notes(base, results, plan), ["genis"])      # dar: min_url=3; iki-kaynak: required=2; genis: varsayılan 8
 
 
 import uzlas  # noqa: E402
@@ -1679,7 +1930,16 @@ class AnahtarOlguKapsamasi(unittest.TestCase):
         self.assertIn("JIT desteklenmez", " ".join(ep[0]["sorular"]))
         self.assertIn("YALNIZ şu eksik olguları bul", ep[0]["amac"])
         self.assertEqual({o["ad"] for o in ep[0]["olgular"]}, {"yama/sürüm yok", "arşivlendi", "JIT desteklenmez"})
-        self.assertEqual(ep[0]["min_url"], 3)
+        self.assertEqual(ep[0]["min_url"], 4)
+        narrow = {k: v for k, v in self.ITEM.items() if k != "min_url"}
+        narrow.update(min_url_required=2, single_publisher_host="rfc-editor.org")
+        with tempfile.TemporaryDirectory() as d:
+            narrow_res = kapsama.run([narrow], self._dirs(d, [("r1", self._not([("Takvim", "until March 2026 maintenance")]))]))
+        narrow_ep = kapsama.eksik_plan(narrow_res)
+        self.assertNotIn("min_url", narrow_ep[0])
+        self.assertEqual(narrow_ep[0]["min_url_required"], 2)
+        self.assertEqual(narrow_ep[0]["single_publisher_host"], "rfc-editor.org")
+        self.assertEqual(arastir.validate(narrow_ep), [])
         many = {"slug": "m", "konu": "k", "sorular": ["s"], "olgular": [{"ad": f"olgu{i}", "ara": f"zzz{i}"} for i in range(9)]}
         with tempfile.TemporaryDirectory() as d:
             p = Path(d) / "r" / "notlar-temiz"; p.mkdir(parents=True); (p / "m.md").write_text(self._not([("a", "b b b b b b")]), encoding="utf-8")
@@ -1749,7 +2009,17 @@ class HafifKip(unittest.TestCase):
     def test_hafif_adim_tavani(self):
         self.assertEqual(arastir.opencode_config("orta", None, True)["agent"]["plan"]["steps"], 24)
         self.assertEqual(arastir.opencode_config("orta", None, True, True)["agent"]["plan"]["steps"], arastir.HAFIF_ADIM)
-        self.assertEqual(arastir.opencode_config("dusuk", None, True, True)["agent"]["plan"]["steps"], 12)   # dusuk 16 → 12
+        self.assertEqual(arastir.opencode_config("dusuk", None, True, True)["agent"]["plan"]["steps"], arastir.HAFIF_ADIM)
+
+    def test_okuyucu_siniri_yalniz_istenen_hafif_kipte_tasinir(self):
+        with tempfile.TemporaryDirectory() as d:
+            limited = arastir.opencode_config("dusuk", Path(d), False, True, read_limit=6)
+            normal = arastir.opencode_config("dusuk", Path(d), False, False)
+        self.assertEqual(limited["mcp"]["oku"]["environment"]["OKU_CAGRI_BUTCE"], "6")
+        self.assertNotIn("OKU_CAGRI_BUTCE", normal["mcp"]["oku"]["environment"])
+        self.assertEqual([arastir.hafif_okuma_siniri(n) for n in (1, 2, 3, 6)], [2, 4, 6, 6])
+        note = arastir.render({**self.ITEM, "sorular": ["a", "b", "c"]}, arastir.load_template(), arastir.OKUMA_MCP, True)
+        self.assertIn("MCP okuyucu en çok 6 çağrı", note)
 
     def test_jeton_ayrintisi_taze_onbellek_cikti_akil(self):
         ev = [{"type": "step_start"},
@@ -1884,10 +2154,12 @@ class HataTeshisi(unittest.TestCase):
     def test_sinir_nedeni_hiz_siniri_adim_butcesi_ikisi_ya_da_hicbiri(self):
         self.assertEqual(arastir.sinir_nedeni("websearch 429 rate limit döndürdü"), "arama hız sınırı (429)")
         self.assertEqual(arastir.sinir_nedeni("Maximum number of steps reached"), "adım bütçesi bitti (OpenCode adım sınırı)")
-        both = arastir.sinir_nedeni("429 rate limit ... maximum number of steps")
+        both = arastir.sinir_nedeni("websearch 429 rate limit döndürdü ... maximum number of steps")
         self.assertIn("hız sınırı", both); self.assertIn("adım bütçesi", both)
         self.assertIsNone(arastir.sinir_nedeni("normal bir araştırma notu"))
         self.assertIsNone(arastir.sinir_nedeni("HTTP 4290 kodu"))     # \b429\b: büyük sayıların içinde eşleşmez
+        self.assertIsNone(arastir.sinir_nedeni("Google's crawlers treat all `4xx` errors, except `429`, as if a valid robots.txt file didn't exist."))
+        self.assertIsNone(arastir.sinir_nedeni("RFC discusses HTTP 429 rate limits as a status-code example."))
 
     def _kos(self, note_text, tools=None):
         def fake(prompt_text, note, *a, **k):

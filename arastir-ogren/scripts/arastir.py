@@ -10,7 +10,8 @@ Arka uçlar (model/sağlayıcı/anahtar ayrıntıları koda gömülü değildir:
   cli       Yapılandırmada tanımlı komut satırı arka ucu (cli_backend; çıktı "responses-json" ya da düz "text"; istem argümanla ya da stdin'den).
   otomatik  (varsayılan) önce opencode, başarısızsa cli. Kullanılamayan arka uçlar zincirden çıkarılır.
 
-PLAN.json: [{"slug","konu","amac","sorular":[...],"kaynaklar","kisitlar"}, ...]
+PLAN.json: [{"slug","konu","amac","sorular":[...],"kaynaklar","kisitlar",
+             "single_publisher_host":"rfc-editor.org" (isteğe bağlı)}, ...]
 Çıktı dizini: istemler/<slug>.md · notlar/<slug>.md · calisma.json · denetim.md
 """
 import argparse
@@ -35,28 +36,40 @@ sys.path.insert(0, str(HERE))
 import ayar  # noqa: E402
 import destek  # noqa: E402
 import kapsama  # noqa: E402
+import denetle  # noqa: E402
 
 TEMPLATE = HERE.parent / "references" / "arastirmaci-istemi.md"
 SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,40}$")
+PUBLISHER_HOST_RE = re.compile(r"^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$")
 MIN_NOTE_BYTES = 300
 MAX_PARALLEL = 4
 # Araştırma çalışanı yalnız arama/okuma yapar: kabuk ve dosya yazma kapalı.
 OPENCODE_PERMISSIONS = {"permission": {"bash": "deny", "edit": "deny", "write": "deny", "external_directory": "deny", "doom_loop": "deny"}}
 REQUIRED_SECTION = "Alıntılı bulgular"   # çalışan çıktı sözleşmesi (references/arastirmaci-istemi.md)
 # 8 Eki 2026 (İHA araştırma deneyi): bir çalışan araştırma yapmadan "Plan Modu etkin, onayınıza sunuyorum" planı döndürdü; planda
-# "Alıntılı bulgular" ifadesi geçtiği için düz alt dize denetimi onu BAŞARILI saydı. Artık: gerçek markdown başlığı + en az MIN_URLS
-# benzersiz URL + plan/onay dili yok + (OpenCode'da) en az bir arama/okuma aracı çağrısı.
+# "Alıntılı bulgular" ifadesi geçtiği için düz alt dize denetimi onu BAŞARILI saydı. Artık: gerçek markdown başlığı + varsayılan MIN_URLS
+# (konu bazında min_url_required) benzersiz URL + plan/onay dili yok + (OpenCode'da) en az bir arama/okuma aracı çağrısı.
 HEADING_RE = re.compile(r"(?m)^#{2,4}[ \t]*Alıntılı bulgular\b")
 URL_RE = re.compile(r"https?://[^\s)>\]\"']+")
 PLAN_RE = re.compile(r"(?i)plan modu|onay(?:ına|ınıza|ınızı|ınız)\s+(?:sun|bekle)|yaklaşımı onay|onaylarsanız|onay vermenizi|awaiting (?:your )?approval")
 # 8 Eki 2026: arama sağlayıcısı oturum boyunca 429 verdi; çalışan "Araştırma tamamlanamadı, arama altyapısı çöktü" yazıp 3 denemede aynı duvara çarptı.
-# Böyle notta (hız sınırı ya da adım bütçesi bitti) aynı arka ucu yeniden denemek boşuna: sıradaki FARKLI arka uca geçilir (rc=10).
-RATE_RE = re.compile(r"(?i)\b429\b|rate.?limit|hız sınırı|arama altyapısı çöktü|arama sağlayıcısı çöktü")
+# Yalnız arama aracı/sağlayıcısı hatası açıkça raporlanınca aynı arka ucu yeniden deneme (rc=10). Araştırma içeriğindeki HTTP 429/rate-limit
+# bilgileri tek başına hata sinyali değildir (örn. robots.txt belgeleri 429 istisnasından söz eder).
+RATE_RE = re.compile(
+    r"(?i)(?:"
+    r"\barama (?:altyapısı|sağlayıcısı) çöktü\b"
+    r"|(?:\bwebsearch\b|\bsearch (?:provider|tool|backend)\b|\barama (?:aracı|sağlayıcısı|altyapısı)\b)"
+    r"[^.\n]{0,160}(?:\b429\b|rate.?limit|hız sınırı)[^.\n]{0,100}(?:döndür\w*|return\w*|hit|failed|error|exceed\w*)"
+    r"|\baraştırma tamamlanamadı\b[^\n]{0,300}"
+    r"(?:\bwebsearch\b|\bsearch (?:provider|tool|backend)\b|\barama (?:aracı|sağlayıcısı|altyapısı)\b)"
+    r"[^\n]{0,160}(?:\b429\b|rate.?limit|hız sınırı)"
+    r")"
+)
 STEP_RE = re.compile(r"(?i)maximum number of steps|adım sınırı|step limit|max.?steps")
 
 
 def sinir_nedeni(text):
-    """Notta hız sınırı ve/veya adım bütçesi izi varsa kısa neden (yoksa None). İkisi ayrı raporlanır: çözümleri farklıdır
+    """Notta açık arama sağlayıcısı hatası ve/veya adım bütçesi izi varsa kısa neden (yoksa None). İkisi ayrı raporlanır: çözümleri farklıdır
     (hız sınırı → sağlayıcı/arama; adım bütçesi → efor ya da konu daraltma)."""
     rate, step = bool(RATE_RE.search(text)), bool(STEP_RE.search(text))
     if rate and step:
@@ -67,12 +80,13 @@ def sinir_nedeni(text):
         return "adım bütçesi bitti (OpenCode adım sınırı)"
     return None
 BROAD_TOPIC_ENTITIES = 6   # bir konuda bu kadar ya da daha çok varlık (ülke/ürün/şirket) sayılıyorsa uyar: 24 adımlık bütçeye sığmaz
-MIN_URLS = 3        # bunun altı: kaynaklı bulgu yok → çıktı sözleşmesi bozuk (rc=9, zincir sürer)
+MIN_URLS = 3        # varsayılan kabul eşiği; dar konular planda min_url_required ile düşürebilir
+MIN_URLS_REQUIRED_MIN = 2  # kabul eşiğinde en az iki farklı URL ile çapraz kaynak gerekir
 WEAK_URLS = 8       # bunun altı kabul edilir ama "zayıf" işaretlenir (çıkış kodu 73; örn. arama 429'a düştü)
 SECRET_RE = re.compile(r"(?i)(api[_-]?key|token|secret|authorization|bearer)([\"'\s:=]+)[A-Za-z0-9._\-]{8,}")
 # Araç çağrısı döngüsünü sınırlar: sınıra gelince OpenCode araçsız nihai cevap yazmaya zorlar (aksi halde sonsuza dek arayabilir).
 STEPS_BY_EFFORT = {"dusuk": 16, "orta": 24, "yuksek": 32}
-HAFIF_ADIM = 12     # --hafif kipinde adım tavanı (araç çağrısı döngüsü; her adım bağlamı yeniden gönderir)
+HAFIF_ADIM = 9      # --hafif kipinde nihai metne daha erken geç; MCP okuyucu ayrıca gerçek çağrı sınırına sahiptir
 # Alt süreçlere (OpenCode ve onun MCP sunucuları) yalnız bu değişkenler geçer; kalan ortam (başka servis anahtarları vb.) sızmaz.
 ENV_ALLOWLIST = ("PATH", "HOME", "USER", "LOGNAME", "SHELL", "TERM", "LANG", "LC_ALL", "LC_CTYPE", "TMPDIR", "TZ", "XDG_CONFIG_HOME",
                  "XDG_DATA_HOME", "XDG_CACHE_HOME", "SSL_CERT_FILE", "SSL_CERT_DIR", "HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY", "https_proxy", "http_proxy", "no_proxy")
@@ -152,6 +166,11 @@ def hafif_butce(n_soru):
     return n + 2, 3 * n + 2
 
 
+def hafif_okuma_siniri(n_soru):
+    """Soru başına en çok iki okuma, toplam altı; kalan adımlar nihai nota ayrılır."""
+    return min(6, max(2, 2 * max(1, n_soru)))
+
+
 def render(item, template, okuma=OKUMA_GENEL, hafif=False):
     sorular = item.get("sorular") or []
     numbered = "\n".join(f"{i}. {s.strip()}" for i, s in enumerate(sorular, 1)) or "1. (belirtilmedi — konuyu kapsamlı ele al)"
@@ -172,6 +191,8 @@ def render(item, template, okuma=OKUMA_GENEL, hafif=False):
         out = out.replace(HAFIF_BUTCE, f"- **Bütçen:** en çok {n_cagri} araç çağrısı (arama + sayfa okuma). Birincil kaynağın URL'sini bulunca aramayı BIRAK; "
                                        "alıntıyı doğrudan o sayfadan al. Bütçe bitince ya da yeni bilgi gelmemeye başlayınca elindekiyle çıktıyı yaz; "
                                        "eksikleri **Boşluklar**'a yaz.")
+        if okuma == OKUMA_MCP:
+            out = out.replace("- **Bütçen:**", f"- MCP okuyucu en çok {hafif_okuma_siniri(len(sorular))} çağrı kabul eder; sınır dolunca yeni okuma deneme, dört bölümlü nihai notu yaz.\n- **Bütçen:**", 1)
     for key, value in values.items():
         out = out.replace("{{" + key + "}}", value)
     return out
@@ -210,12 +231,17 @@ def validate(plan):
         for key in ("amac", "kaynaklar", "kisitlar"):
             if key in item and not isinstance(item[key], str):
                 errors.append(f"#{i}: '{key}' metin olmalı")
+        if "single_publisher_host" in item and (not isinstance(item["single_publisher_host"], str)
+                or not PUBLISHER_HOST_RE.fullmatch(item["single_publisher_host"])):
+            errors.append(f"#{i}: 'single_publisher_host' yalnız küçük harfli DNS alan adı olmalı")
         try:
             kapsama.olgulari_oku(item)
         except kapsama.OlguHatasi as e:
             errors.append(f"#{i}: {e}")
         if "min_url" in item and not (isinstance(item["min_url"], int) and not isinstance(item["min_url"], bool) and MIN_URLS <= item["min_url"] <= 30):
             errors.append(f"#{i}: 'min_url' {MIN_URLS} ile 30 arasında tam sayı olmalı (bu konu için 'zayıf not' eşiği; varsayılan {WEAK_URLS})")
+        if "min_url_required" in item and not (isinstance(item["min_url_required"], int) and not isinstance(item["min_url_required"], bool) and MIN_URLS_REQUIRED_MIN <= item["min_url_required"] <= 30):
+            errors.append(f"#{i}: 'min_url_required' {MIN_URLS_REQUIRED_MIN} ile 30 arasında tam sayı olmalı (varsayılan kabul eşiği {MIN_URLS})")
     return errors
 
 
@@ -226,6 +252,11 @@ def parse_opencode_events(stdout):
     Nihai cevap = `step_finish.reason == "stop"` ile biten adımın metni (gerçek akışta ölçüldü: ara adımlar "tool-calls" ile biter).
     Araç çağrısıyla biten (ör. adım sınırına/zaman aşımına takılan) bir akışta ara düşünce metni "cevap" sayılmaz; `tamam` False döner."""
     steps, reasons, step, tools, errors, tokens = {}, {}, 0, {}, [], [0, 0]
+    profile = {}   # yalnız sayılar ve araç adları: sayfa metni, istem ve araç argümanları saklanmaz
+
+    def metric(n):
+        return profile.setdefault(n, {"adim": n, "araclar": {}, "neden": None,
+                                      "taze": 0, "onbellek": 0, "cikti": 0, "akil": 0})
     detail = {"taze": 0, "onbellek": 0, "cikti": 0, "akil": 0}   # maliyet dökümü: önbellekten okunan girdi taze girdiden çok ucuzdur, toplama gömülmesin
     for line in stdout.splitlines():
         line = line.strip()
@@ -241,15 +272,24 @@ def parse_opencode_events(stdout):
         kind = ev.get("type")
         if kind == "step_start":
             step += 1
+            metric(step)
         elif kind == "text" and part.get("text"):
             steps.setdefault(step, []).append(part["text"])
         elif kind == "tool_use":
             name = part.get("tool") or "?"
             tools[name] = tools.get(name, 0) + 1
+            per_step = metric(step)["araclar"]
+            per_step[name] = per_step.get(name, 0) + 1
         elif kind == "step_finish":
             reasons[step] = part.get("reason")
             t = part.get("tokens") if isinstance(part.get("tokens"), dict) else {}
             cache = t.get("cache") if isinstance(t.get("cache"), dict) else {}
+            current = metric(step)
+            current["neden"] = reasons[step]
+            current["taze"] += t.get("input") or 0
+            current["onbellek"] += cache.get("read") or 0
+            current["cikti"] += t.get("output") or 0
+            current["akil"] += t.get("reasoning") or 0
             tokens[0] += (t.get("input") or 0) + (cache.get("read") or 0)
             tokens[1] += (t.get("output") or 0) + (t.get("reasoning") or 0)
             detail["taze"] += t.get("input") or 0
@@ -264,7 +304,8 @@ def parse_opencode_events(stdout):
     else:           # "stop" ile biten adım yok → kesilmiş ya da tanınmayan akış: ara düşünce metni nihai cevap SAYILMAZ (kapalı-varsayılan)
         final, done = "", False
     return {"metin": final, "araclar": tools, "hatalar": errors, "jeton": tokens, "tamam": done,
-            "son_neden": reasons[max(reasons)] if reasons else None, "ayrinti": detail}
+            "son_neden": reasons[max(reasons)] if reasons else None, "ayrinti": detail,
+            "adimlar": [profile[n] for n in sorted(profile)]}
 
 
 def redact(text):
@@ -283,7 +324,7 @@ def hata_ozeti(err, out="", rc=None, ad="", sinir=200):
     return ozet if len(ozet) <= sinir else "…" + ozet[-(sinir - 1):]
 
 
-def check_contract(text, minimum=MIN_NOTE_BYTES):
+def check_contract(text, minimum=MIN_NOTE_BYTES, minimum_urls=MIN_URLS, expected_questions=None):
     """Çalışan çıktısının sözleşmeye uyup uymadığı: (ok, neden). Boş/kısa/başlıksız/kaynaksız/plan metni çıktı başarı sayılmaz."""
     if len(text.encode("utf-8")) < minimum:
         return False, f"çıktı çok kısa (<{minimum} bayt)"
@@ -291,9 +332,17 @@ def check_contract(text, minimum=MIN_NOTE_BYTES):
         return False, "plan/onay metni döndürdü (araştırma yapılmadı): 'Plan Modu' bahanesiyle onay istedi"
     if not HEADING_RE.search(text):
         return False, f"'{REQUIRED_SECTION}' başlığı yok (çıktı sözleşmesi bozuk)"
+    if expected_questions is not None:
+        questions = denetle.parse_note_text(text)
+        if len(questions) != expected_questions:
+            return False, f"{len(questions)} soru bölümü var (planda {expected_questions}); ek/eksik '##' başlığı"
+        for q in questions:
+            missing = [s for s in denetle.SECTIONS if s not in q["bolumler"]]
+            if missing:
+                return False, f"'{q['baslik'][:50]}': eksik bölüm → {', '.join(missing)}"
     n_urls = len(set(URL_RE.findall(text)))
-    if n_urls < MIN_URLS:
-        return False, f"yalnız {n_urls} benzersiz URL (<{MIN_URLS}): kaynaklı bulgu yok"
+    if n_urls < minimum_urls:
+        return False, f"yalnız {n_urls} benzersiz URL (<{minimum_urls}): kaynaklı bulgu yok"
     return True, ""
 
 
@@ -354,7 +403,7 @@ def opencode_argv(model, prompt_text, workdir, effort):
 
 
 # ----------------------------------------------------------------------------- arka uç çalıştırıcıları
-def opencode_config(effort, reader_cache=None, search=True, hafif=False):
+def opencode_config(effort, reader_cache=None, search=True, hafif=False, read_limit=None):
     """Çalışan yapılandırması: en az yetki. `tools` kapalı-varsayılandır (`"*": false`): kullanıcının genel OpenCode MCP'leri
     (kullanıcının kendi eklediği her MCP sunucusu), `read/grep/glob/task/skill` gibi yerleşikler dahil yalnız burada açıkça verilenler çalışır.
     Gerçek OpenCode ile ölçüldü: bu ayarla model yalnız `oku_sayfa_oku, oku_sayfada_ara, websearch` araçlarını görür."""
@@ -369,6 +418,8 @@ def opencode_config(effort, reader_cache=None, search=True, hafif=False):
         cfg["permission"]["webfetch"] = "deny"
         cfg["mcp"] = {"oku": {"type": "local", "command": [sys.executable, str(HERE / "mcp_oku.py")],
                               "environment": {"OKU_ONBELLEK": str(reader_cache)}, "enabled": True}}
+        if read_limit is not None:
+            cfg["mcp"]["oku"]["environment"]["OKU_CAGRI_BUTCE"] = str(read_limit)
         tools["oku_*"] = True
     else:
         tools["webfetch"] = True
@@ -376,13 +427,13 @@ def opencode_config(effort, reader_cache=None, search=True, hafif=False):
     return cfg
 
 
-def work_opencode(prompt_text, note, base, model_key, effort, timeout, search, reader=True, hafif=False):
+def work_opencode(prompt_text, note, base, model_key, effort, timeout, search, reader=True, hafif=False, read_limit=None):
     key = api_key()
     if ayar.needs_key() and not key:
         return {"rc": 5, "hata": f"anahtar bulunamadı ({ayar.api_key_env()}: ortam ya da key_files; bkz. quoteproof.example.json)"}
     workdir = base / ".oc-calisma"
     workdir.mkdir(exist_ok=True)
-    extra = {"OPENCODE_CONFIG_CONTENT": json.dumps(opencode_config(effort, base / "kaynaklar" if reader else None, search, hafif))}
+    extra = {"OPENCODE_CONFIG_CONTENT": json.dumps(opencode_config(effort, base / "kaynaklar" if reader else None, search, hafif, read_limit))}
     if ayar.needs_key():
         extra[ayar.api_key_env()] = key
     if search:
@@ -392,15 +443,15 @@ def work_opencode(prompt_text, note, base, model_key, effort, timeout, search, r
     rc, out, err, timed_out = run_cmd(cmd, env=env, cwd=str(workdir), timeout=timeout + 60)
     parsed = parse_opencode_events(out)
     if timed_out:
-        return {"rc": 6, "hata": "OpenCode zaman aşımı", "jeton": parsed["jeton"], "araclar": parsed["araclar"], "ayrinti": parsed["ayrinti"]}
+        return {"rc": 6, "hata": "OpenCode zaman aşımı", "jeton": parsed["jeton"], "araclar": parsed["araclar"], "ayrinti": parsed["ayrinti"], "adimlar": parsed["adimlar"]}
     if rc != 0 or parsed["hatalar"]:
         why = parsed["hatalar"][0] if parsed["hatalar"] else hata_ozeti(err, out, rc or 3, "opencode")
-        return {"rc": rc or 3, "hata": redact(why)[:200], "jeton": parsed["jeton"], "araclar": parsed["araclar"], "ayrinti": parsed["ayrinti"]}
+        return {"rc": rc or 3, "hata": redact(why)[:200], "jeton": parsed["jeton"], "araclar": parsed["araclar"], "ayrinti": parsed["ayrinti"], "adimlar": parsed["adimlar"]}
     if not parsed["tamam"]:
         return {"rc": 7, "hata": f"akış nihai cevap (reason=stop) olmadan bitti (adım sınırı/kesinti; son adım nedeni: {parsed['son_neden'] or 'yok'})", "jeton": parsed["jeton"],
-                "araclar": parsed["araclar"]}
+                "araclar": parsed["araclar"], "ayrinti": parsed["ayrinti"], "adimlar": parsed["adimlar"]}
     note.write_text(parsed["metin"] + "\n", encoding="utf-8")
-    return {"rc": 0, "jeton": parsed["jeton"], "araclar": parsed["araclar"], "ayrinti": parsed["ayrinti"]}
+    return {"rc": 0, "jeton": parsed["jeton"], "araclar": parsed["araclar"], "ayrinti": parsed["ayrinti"], "adimlar": parsed["adimlar"]}
 
 
 def work_cli(prompt_text, note, model_key, timeout):
@@ -477,7 +528,11 @@ def run_worker(item, base, args, start_delay=0.0, sequence=None):
             hafif = getattr(args, "hafif", False) is True
             prompt_text = render(item, template, OKUMA_MCP if use_mcp else OKUMA_GENEL, hafif)
             if backend == "opencode":
-                r = work_opencode(prompt_text, note, base, args.model, args.efor, args.sure, not args.arama_yok, use_mcp, hafif)
+                # Okuyucunun gerçek sınırı istemdeki toplam araç bütçesinden düşüktür;
+                # modelin son adımlarda kaynakları derleyip metin üretmesine yer kalır.
+                read_limit = hafif_okuma_siniri(len(item["sorular"])) if hafif and use_mcp else None
+                r = work_opencode(prompt_text, note, base, args.model, args.efor, args.sure, not args.arama_yok,
+                                  use_mcp, hafif, read_limit)
             else:
                 r = work_cli(prompt_text, note, args.model, args.sure)
         except Exception as e:   # bir çalışanın beklenmedik çökmesi tüm koşuyu düşürmesin
@@ -490,7 +545,8 @@ def run_worker(item, base, args, start_delay=0.0, sequence=None):
         text = note.read_text(encoding="utf-8", errors="replace") if note.exists() else ""
         size = len(text.encode("utf-8"))
         result["bayt"] = size
-        ok_contract, why = check_contract(text) if r["rc"] == 0 else (False, "")
+        ok_contract, why = check_contract(text, minimum_urls=item.get("min_url_required", MIN_URLS),
+                                          expected_questions=len(item["sorular"])) if r["rc"] == 0 else (False, "")
         tools_used = r.get("araclar")
         if ok_contract and backend == "opencode" and isinstance(tools_used, dict) and \
                 not any(k.startswith(("websearch", "oku_", "webfetch")) for k in tools_used):
@@ -508,7 +564,8 @@ def run_worker(item, base, args, start_delay=0.0, sequence=None):
             bad.mkdir(exist_ok=True)
             note.replace(bad / f"{slug}.deneme{result['deneme']}.md")
         result["denemeler"].append({"arka": backend, "rc": r["rc"], "hata": r.get("hata", ""), "bayt": size,
-                                    "jeton": r.get("jeton") or [0, 0], "araclar": r.get("araclar") or {}, "ayrinti": r.get("ayrinti")})   # deneme başına maliyet/teşhis
+                                    "jeton": r.get("jeton") or [0, 0], "araclar": r.get("araclar") or {},
+                                    "ayrinti": r.get("ayrinti"), "adimlar": r.get("adimlar") or []})   # deneme başına maliyet/teşhis
         if r["rc"] == 0:
             result["ok"] = True
             break
@@ -525,8 +582,8 @@ def run_worker(item, base, args, start_delay=0.0, sequence=None):
 
 
 def weak_notes(base, results, plan):
-    """Başarılı ama kaynak kapsamı zayıf notlar. Eşik konu başına: varsayılan WEAK_URLS; dar bir konuda plan `min_url` ile değiştirir."""
-    thresholds = {item["slug"]: item.get("min_url", WEAK_URLS) for item in plan}
+    """Başarılı ama kaynak kapsamı zayıf notlar. Eşik: `min_url`, yoksa `min_url_required`, ikisi de yoksa WEAK_URLS."""
+    thresholds = {item["slug"]: item.get("min_url", item.get("min_url_required", WEAK_URLS)) for item in plan}
     weak = []
     for slug_ok in [r["slug"] for r in results if r["ok"]]:
         note_path = base / "notlar" / f"{slug_ok}.md"
@@ -546,7 +603,7 @@ def main():
     ap.add_argument("-j", "--is", dest="jobs", type=int, default=3, help=f"paralel çalışan (en çok {MAX_PARALLEL})")
     ap.add_argument("-t", "--sure", type=int, default=420, help="çalışan başına saniye tavanı")
     ap.add_argument("--kuru", action="store_true", help="yalnız istemleri üret, çalışan koşturma")
-    ap.add_argument("--hafif", action="store_true", help="jeton tasarrufu: konuya ölçekli az arama/çağrı bütçesi, aramada en çok 4 sonuç, adım tavanı 12 (alıntı sözleşmesi ve doğrulama aynen)")
+    ap.add_argument("--hafif", action="store_true", help=f"jeton tasarrufu: konuya ölçekli az arama/çağrı bütçesi, aramada en çok 4 sonuç, adım tavanı {HAFIF_ADIM} (alıntı sözleşmesi ve doğrulama aynen)")
     ap.add_argument("--link-yok", action="store_true", help="denetimde bağlantı kontrolünü atla")
     ap.add_argument("--okuyucu", default="mcp", choices=["mcp", "yerlesik"],
                     help="mcp: OpenCode çalışanı sayfayı sıkıştırılmış okur (oku MCP, webfetch kapalı) · yerlesik: OpenCode webfetch (tam sayfa)")
@@ -617,7 +674,8 @@ def main():
         slug, note = item["slug"], base / "notlar" / f"{item['slug']}.md"
         prev = previous.get(slug)
         if prev and prev.get("ok") and prev.get("hash") == prompt_hash[slug] and note.exists() and \
-                check_contract(note.read_text(encoding="utf-8", errors="replace"))[0]:
+                check_contract(note.read_text(encoding="utf-8", errors="replace"),
+                               minimum_urls=item.get("min_url_required", MIN_URLS), expected_questions=len(item["sorular"]))[0]:
             reused.append({**prev, "devam": True})
         else:
             note.unlink(missing_ok=True)
@@ -675,7 +733,7 @@ def main():
     good = [f"{r['slug']}.md" for r in results if r["ok"]]   # yalnız bu koşunun başarılı notları denetlenir/doğrulanır
     weak = weak_notes(base, results, plan)
     if weak:
-        print(f"arastir: ⚠ ZAYIF not (eşik altı benzersiz kaynak; varsayılan <{WEAK_URLS}, konuda `min_url` ile değişir): {', '.join(weak)}. Arama hız sınırına (429) takılmış olabilir: "
+        print(f"arastir: ⚠ ZAYIF not (eşik altı benzersiz kaynak; varsayılan <{WEAK_URLS}, konuda `min_url` veya `min_url_required` ile değişir): {', '.join(weak)}. Arama hız sınırına (429) takılmış olabilir: "
               f"notlar/<slug>.md'yi silip `-j 2` ile `--devam` koştur ya da konuyu bölüp yeniden çalıştır.", flush=True)
     code = 0
     cmd = [sys.executable, str(HERE / "denetle.py"), str(base / "notlar")]

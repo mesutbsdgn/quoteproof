@@ -36,6 +36,17 @@ TOOLS = [
 
 
 SUPPORTED_VERSIONS = ("2025-06-18", "2025-03-26", "2024-11-05")
+_READ_CALLS = 0
+
+
+def read_budget():
+    """Hafif işçiye verilen süreç başı okuyucu sınırı; diğer kullanımlar sınırsızdır."""
+    raw = os.environ.get("OKU_CAGRI_BUTCE")
+    if raw is None:
+        return None
+    if not raw.isdecimal() or int(raw) < 1:
+        raise ValueError("OKU_CAGRI_BUTCE pozitif tam sayı olmalı")
+    return int(raw)
 
 
 def call_tool(name, args):
@@ -85,6 +96,12 @@ def handle(req):
     if method == "tools/call":
         params = req.get("params") if isinstance(req.get("params"), dict) else {}
         try:
+            global _READ_CALLS
+            if params.get("name") in ("sayfa_oku", "sayfada_ara"):
+                limit = read_budget()
+                if limit is not None and _READ_CALLS >= limit:
+                    raise ValueError("Okuma bütçesi doldu; mevcut kanıtla dört bölümlü nihai notu yaz, eksikleri Boşluklar bölümüne koy.")
+                _READ_CALLS += 1  # hata veren okuma da bütçeyi tüketir; yinelenen çağrılar sınırsız olamaz
             text, is_error = call_tool(params.get("name"), params.get("arguments") or {})
         except Exception as e:  # araç hatası protokol hatası değildir
             text, is_error = f"HATA: {e}", True

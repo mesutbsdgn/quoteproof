@@ -63,6 +63,19 @@ class Extract(unittest.TestCase):
 
 
 class Regression(unittest.TestCase):
+    def test_normatif_kisa_baglantili_liste_ogesi_korunur(self):
+        page = ('<html><body><nav><ul><li><a href="/menu">İçindekiler</a></li></ul></nav>'
+                '<p>The server generating a 304 response MUST generate any of the following header fields '
+                'that would have been sent in a 200 response to the same request:</p>'
+                '<ul><li><a href="/a">Content-Location</a>, <a href="/b">Date</a>, '
+                '<a href="/c">ETag</a>, and <a href="/d">Vary</a></li>'
+                '<li><a href="/e">Cache-Control</a> and <a href="/f">Expires</a></li></ul>'
+                '</body></html>')
+        md = oku.to_markdown(oku.extract_blocks(page)[1])
+        self.assertIn('Content-Location, Date, ETag, and Vary', md)
+        self.assertIn('Cache-Control and Expires', md)
+        self.assertNotIn('İçindekiler', md)
+
     def test_body_sinifi_nav_sidebar_icerigi_atmaz(self):
         page = ('<html><head><title>T</title></head><body class="nav-sidebar floating"><div class="page-layout has-sidebar"><main>'
                 '<h1>Başlık</h1><p>' + "Bu bir ana içerik cümlesidir. " * 30 + '</p></main></div></body></html>')

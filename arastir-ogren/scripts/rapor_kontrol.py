@@ -253,6 +253,9 @@ def run(report_text, cache_dir=None, notes_urls=None, hints=None, jobs=4, loader
         results.append({**it, "urls": urls, "bulgular": merge_findings(findings)})
     extra = []
     unreadable = [u for u in all_urls if not pool[u]["ok"]]
+    for u in unreadable:
+        extra.append(_finding("uyarı", "kaynak-okunamadı",
+                              f"atıf yapılan kaynak okunamadı; bu URL'ye bağlı alıntı ve sayılar denetlenemedi: {u}"))
     if notes_urls is not None:
         known = {normalize_url(u) for u in notes_urls}
         for u in all_urls:

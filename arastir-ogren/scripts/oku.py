@@ -526,11 +526,17 @@ def _extract(page_html, use_hints):
     if sum(len(b["metin"]) for b in blocks if b["ana"]) >= 400:
         blocks = [b for b in blocks if b["ana"] or b["tur"].startswith("h")]
     clean, seen = [], set()
+    content_list = False
     for b in blocks:
         text = b["metin"]
         # bağlantı yoğunluğu yüksek kısa bloklar = menü/liste gürültüsü; ana içerikteki (>=40 karakter) bağlantı cümleleri korunur
         link_noise = b["bag"] > 0.6 * len(text) and len(text) < 600 and not b["tur"].startswith("h") and b["tur"] != "pre"
-        if link_noise and not (b["ana"] and len(text) >= 40):
+        # Normatif metindeki "... aşağıdaki alanlar:" cümlesini izleyen kısa, tamamı bağlantılı
+        # liste öğeleri de kanıttır (RFC 9110 §15.4.5 alan listesi gibi).
+        in_content_list = b["tur"] == "li" and content_list
+        if b["tur"] != "li":
+            content_list = len(text) >= 70 and bool(re.search(r":(?:¶)?$", text))
+        if link_noise and not (b["ana"] and len(text) >= 40) and not in_content_list:
             continue
         if text in seen and len(text) < 120:
             continue

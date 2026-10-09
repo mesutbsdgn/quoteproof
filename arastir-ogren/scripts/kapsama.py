@@ -148,7 +148,12 @@ def eksik_plan(res):
         item["sorular"] = sorular
         item["amac"] = "YALNIZ şu eksik olguları bul (diğerleri başka çalıştırmada bulundu): " + "; ".join(e["ad"] for e in ek[:8])
         item["olgular"] = [{"ad": e["ad"], "ara": e["ara"]} for e in ek]
-        item["min_url"] = 3
+        # Açık min_url'u koru; dar plandaki min_url_required=2 varsa zayıflık eşiği
+        # çalıştırıcıda zaten ondan türetilir. min_url=2 yazmak şema dışı olur.
+        if "min_url" in r["item"]:
+            item["min_url"] = r["item"]["min_url"]
+        elif "min_url_required" not in r["item"]:
+            item["min_url"] = 3
         plan.append(item)
     return plan
 

@@ -4,7 +4,7 @@
 Kontroller (not başına):
   - biçim: her soru bölümünde Özet / Alıntılı bulgular / Çıkarımlar / Boşluklar
   - kaynaksız bulgu: "Alıntılı bulgular" altında URL'si olmayan madde
-  - bağlantılar: canlılık (HEAD, gerekirse GET), arama-sonuç sayfası, tek alan adına bağımlılık
+  - bağlantılar: canlılık (HEAD, gerekirse GET), arama-sonuç sayfası, plan bağlamında tek alan adına bağımlılık
   - kaynak güvenilirliği: alan adı sınıfı/puanı (guven.py), 'birincil' iddiası uyuşmazlığı, bildirilen tarih eskiliği
   - doğrulama adayları: sayısal/tarihli, tek kaynaklı, ikincil kaynaklı iddialar (Claude'un kaynakta açması için)
 
@@ -52,11 +52,23 @@ def bullet_urls(text):
 
 
 def host(url):
-    return urllib.parse.urlparse(url).netloc.lower().removeprefix("www.")
+    return (urllib.parse.urlparse(url).hostname or "").lower().removeprefix("www.")
 
 
-def parse_note(path):
-    text = path.read_text(encoding="utf-8", errors="replace")
+def planned_publishers(path):
+    """Açıkça planlanan tek yayımlayıcıyı konu slug'ına bağla."""
+    if not path:
+        return {}
+    data = json.loads(Path(path).read_text(encoding="utf-8"))
+    if not isinstance(data, list):
+        return {}
+    return {item["slug"]: item["single_publisher_host"] for item in data
+            if isinstance(item, dict) and isinstance(item.get("slug"), str)
+            and isinstance(item.get("single_publisher_host"), str)}
+
+
+def parse_note_text(text):
+    """İşçi kabul kapısı ve denetim için ortak, ağsız bölüm ayrıştırıcısı."""
     questions, current, sub = [], None, None
     for line in text.splitlines():
         if line.startswith("## "):
@@ -68,7 +80,12 @@ def parse_note(path):
             current["bolumler"].setdefault(sub, [])
         elif current is not None and sub is not None:
             current["bolumler"][sub].append(line)
-    return text, questions
+    return questions
+
+
+def parse_note(path):
+    text = path.read_text(encoding="utf-8", errors="replace")
+    return text, parse_note_text(text)
 
 
 def analyze(path):
@@ -248,16 +265,23 @@ def trust_section(results, hints):
     return L + [""]
 
 
-def render(results, link_status, candidates, link_checked, github=None, hints=None):
+def render(results, link_status, candidates, link_checked, github=None, hints=None, publishers=None):
     L = ["# Araştırma notu denetimi", ""]
     L += ["| Not | Bulgu | Kaynaksız | URL | Farklı alan adı | Sorun |", "|---|---:|---:|---:|---:|---|"]
+    publisher_info = []
     for r in results:
         hosts = {host(u) for u in r["urls"]}
+        documents = {urllib.parse.urldefrag(u).url for u in r["urls"]}
         issues = list(r["sorunlar"])
         if r["bos"]:
             issues.append("not boş/çok kısa")
         if len(hosts) == 1 and r["bulgu"] >= 3:
-            issues.append("tüm kaynaklar tek alan adı")
+            expected = (publishers or {}).get(Path(r["dosya"]).stem)
+            if expected in hosts and len(documents) >= 2:
+                publisher_info.append(f"- `{r['dosya']}`: {len(documents)} farklı belge, {len(hosts)} alan adı "
+                                      f"(`{expected}`); planla uyumlu. Bağımsız yayımlayıcı teyidi sayılmaz.")
+            else:
+                issues.append("tüm kaynaklar tek alan adı")
         if r["devralan"]:
             issues.append(f"{r['devralan']} madde URL'yi 'aynı kaynak' diye devraldı (kendi URL'si yok)")
         if r["aramasiz"]:
@@ -266,6 +290,8 @@ def render(results, link_status, candidates, link_checked, github=None, hints=No
             issues.append("alıntılı bulgu yok")
         L.append(f"| {r['dosya']} | {r['bulgu']} | {len(r['kaynaksiz'])} | {len(r['urls'])} | {len(hosts)} | {'; '.join(issues) or '—'} |")
     L.append("")
+    if publisher_info:
+        L += ["## Kaynak çeşitliliği (planla uyumlu)", "", *publisher_info, ""]
     unc = [(r["dosya"], f) for r in results for f in r["kaynaksiz"]]
     if unc:
         L += ["## Kaynaksız bulgular (rapora ALMA, Claude bulana kadar boşluk say)", ""]
@@ -309,7 +335,7 @@ def main():
     ap.add_argument("--aday", type=int, default=8, help="doğrulama adayı sayısı")
     ap.add_argument("--github-yok", action="store_true", help="GitHub depo doğrulamasını (gh api) atla")
     ap.add_argument("--is", dest="jobs", type=int, default=8, help="eşzamanlı bağlantı kontrolü")
-    ap.add_argument("--plan", help="PLAN.json: `kaynaklar` ipuçları güvenilirlik puanına +10 verir")
+    ap.add_argument("--plan", help="PLAN.json: kaynak ipuçları ve beklenen tek yayımlayıcı alan adı")
     ap.add_argument("--dosyalar", nargs="+", help="yalnız bu not dosyaları (plan dışı eski notlar karışmasın)")
     a = ap.parse_args()
 
@@ -328,7 +354,8 @@ def main():
     hints = guven.hints_by_slug(a.plan) if a.plan else {}
     candidates = verification_candidates(results, link_status, a.aday, hints)
     github = None if (a.github_yok or a.link_yok) else verify_github(results)
-    report = render(results, link_status, candidates, not a.link_yok, github, hints)
+    report = render(results, link_status, candidates, not a.link_yok, github, hints,
+                    planned_publishers(a.plan))
     out = Path(a.cikti) if a.cikti else d.parent / "denetim.md"
     out.write_text(report + "\n", encoding="utf-8")
     print(report)
