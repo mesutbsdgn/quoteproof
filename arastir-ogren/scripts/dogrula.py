@@ -57,6 +57,8 @@ ASCII_QUOTE_RE = re.compile(r'"([^"]{12,320})"')
 EDITORIAL_RE = r"\[(?=[^\]]*\s)[^\]]*\]|\[[A-Za-z]{3,}\]"
 
 
+# Sayfa metninde kalan satır içi HTML ("group <u>x25519mlkem768</u> is"): görünen metnin parçası değildir, iki tarafta da atılır.
+INLINE_TAG_RE = re.compile(r"</?(?:u|b|i|em|strong|span|sup|sub|small|mark|abbr|kbd|a|font|s|del|ins|wbr)(?:\s[^<>\n]{0,200})?/?>", re.I)
 ENTITY_RE = re.compile(r"&(?:#\d{1,7}|#[xX][0-9a-fA-F]{1,6}|[A-Za-z][A-Za-z0-9]{1,31});")
 # Tam genişlikli ASCII (！…～) ve CJK noktalaması ASCII'ye: sayfada "（Exploited in the wild）", çalışan "(Exploited in the wild)" yazar.
 FULLWIDTH = {c: c - 0xFEE0 for c in range(0xFF01, 0xFF5F)}
@@ -68,6 +70,7 @@ CJK_SPACE_RE = re.compile(rf"(?<=[{CJK_CHARS}])\s+|\s+(?=[{CJK_CHARS}])")
 
 def norm(text):
     text = ENTITY_RE.sub(lambda m: html.unescape(m.group(0)), text)   # sayfa ham markdown'sa "&trade;" ↔ alıntıdaki "™"
+    text = INLINE_TAG_RE.sub("", text)
     text = MD_LINK_RE.sub(r"\1", text)   # sayfada [10-100x faster](url) than pip → "10-100x faster than pip"
     text = text.lower().replace("̇", "").replace("–", "-").replace("—", "-").replace("×", "x").replace(" ", " ")
     text = text.translate(FULLWIDTH).translate(CJK_PUNCT)
@@ -386,6 +389,15 @@ def collect(notes_dir, files=None):
     return [denetle.analyze(p) for p in paths]
 
 
+THIN_CHARS = 800            # çıkarılan metin bundan kısaysa ...
+THIN_RAW_BYTES = 20000      # ... ve ham HTML bundan büyükse içerik çıkarılamamıştır (JS ile yüklenen sayfa)
+
+
+def thin_page(page):
+    """Okunabilir görünen ama içeriği çıkarılamamış sayfa (kısa metin + büyük ham HTML)."""
+    return len(page.get("markdown", "")) < THIN_CHARS and page.get("ham_bayt", 0) > THIN_RAW_BYTES
+
+
 # Geçici hatalar: sayfa bir kez daha denenir (arXiv paralel yükte "toplam süre aşıldı", CDN 5xx/521, robots.txt ağ hatası).
 # Kalıcı olanlar (robots.txt engeli, 403/404, sertifika) yeniden denenmez.
 TRANSIENT_RE = re.compile(r"(?i)toplam süre aşıldı|zaman aşımı|timed out|HTTP 5\d\d|HTTP 429|okunamadı \(ağ hatası\)|connection (?:reset|refused)")
@@ -442,7 +454,12 @@ def run(notes_dir, limit=0, jobs=4, cache_dir=None, files=None, hints=None):
                 verdict, found, total, missing = judge(ev, page_norm)
                 row = {"karar": verdict, "bulunan": found, "toplam": total, "eksik": missing, "neden": "", "url": url,
                        "enjeksiyon_izi": bool(oku.INJECTION.search(page["markdown"]))}
-                if verdict == "Bulunamadı" and ev["alinti"]:
+                if verdict == "Bulunamadı" and thin_page(page):
+                    # sayfadan neredeyse hiç metin çıkmadı: alıntı "yok" değil, sayfa okunamadı (uydurma şüphesi etiketi haksız olurdu)
+                    row.update(karar="Erişilemedi", bulunan=0, toplam=0, eksik=[],
+                               neden=f"sayfadan yalnız {len(page['markdown'])} karakter çıkarılabildi ({page.get('ham_bayt', 0)} bayt HTML; içerik "
+                                     "JavaScript ile yükleniyor olabilir): alıntı doğrulanamadı, 'yok' denemez")
+                elif verdict == "Bulunamadı" and ev["alinti"]:
                     near = en_yakin_alinti(ev["alinti"], page_norm)
                     if near:
                         row["yakin"] = near

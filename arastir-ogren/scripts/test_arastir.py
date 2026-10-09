@@ -1408,6 +1408,11 @@ class NormalizasyonGevsetme(unittest.TestCase):
         self.assertEqual(self._karar("improves repair by + 3.3 to + 14.7 points", "this improves repair by +3.3 to +14.7 points in all"), "Doğrulandı")
         self.assertEqual(self._karar("inflates the patching task solve rate of agents by 1.83 × on average", "inflates the patching task solve rate of agents by 1.83× on average"), "Doğrulandı")
 
+    def test_satir_ici_html_etiketi_sayfa_metninden_atilir(self):
+        page = "Recent data. In TLS 1.3, the key exchange group <u>X25519MLKEM768</u> is the only recommended algorithm for post-quantum encryption. It is now"
+        self.assertEqual(self._karar("In TLS 1.3, the key exchange group X25519MLKEM768 is the only recommended algorithm for post-quantum encryption.", page), "Doğrulandı")
+        self.assertNotEqual(self._karar("In TLS 1.3, the key exchange group X25519MLKEM1024 is the only recommended algorithm for post-quantum encryption.", page), "Doğrulandı")
+
     def test_degisen_rakam_ve_ondalik_ayirici_yine_bulunamaz(self):
         self.assertNotEqual(self._karar("improves repair by + 3.3 to + 14.7 points", "this improves repair by +4.3 to +14.7 points in all"), "Doğrulandı")
         self.assertNotEqual(self._karar("the monthly limit is 1.5 million requests", "note: the monthly limit is 1,5 million requests per key"), "Doğrulandı")
@@ -1415,6 +1420,32 @@ class NormalizasyonGevsetme(unittest.TestCase):
     def test_yakin_gecis_ondalik_sayi_ayni_yazimdaysa_noktalama_farki_sayilir(self):
         r = dogrula.yakin_gecis("the rate was 0.67 percent here today", dogrula.page_text_norm("see (the rate was 0.67 percent) here today and more"))
         self.assertTrue(r["noktalama_farki"])
+
+
+class InceSayfaErisilemedi(unittest.TestCase):
+    """Büyük HTML'den neredeyse hiç metin çıkmayan sayfada (JS ile yüklenen içerik) alıntı "yok" denemez: Erişilemedi."""
+    def _satir(self, markdown, ham):
+        note = '# k\n## S\n### Alıntılı bulgular\n- A — "the browser will offer a key share prediction" — [U](https://js.example/x)\n'
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / "n.md").write_text(note, encoding="utf-8")
+            page = {"ok": True, "markdown": markdown, "hata": "", "ham_bayt": ham}
+            with mock.patch.object(dogrula.oku, "load", return_value=page):
+                rows, cov = dogrula.run(d, limit=0, jobs=1)
+        return rows[0], dogrula.render(rows, cov)
+
+    def test_ince_cikarim_buyuk_html_erisilemedi(self):
+        row, text = self._satir("## Security Blog\n\nSeptember 13, 2024", 125000)
+        self.assertEqual(row["karar"], "Erişilemedi")
+        self.assertIn("karakter çıkarılabildi", row["neden"])
+        self.assertNotIn("RAPORA GİRMEZ", text)
+
+    def test_dolu_sayfada_olmayan_alinti_hala_bulunamadi(self):
+        row, _ = self._satir("Başka bir konu hakkında yeterince uzun bir metin. " * 40, 125000)
+        self.assertEqual(row["karar"], "Bulunamadı")
+
+    def test_kisa_ama_ham_html_de_kucukse_bulunamadi(self):
+        row, _ = self._satir("Kısa ama gerçek bir sayfa metni.", 3000)
+        self.assertEqual(row["karar"], "Bulunamadı")
 
 
 class Gecici_Hata_Yeniden_Deneme(unittest.TestCase):

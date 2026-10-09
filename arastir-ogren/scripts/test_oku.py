@@ -439,7 +439,7 @@ class PdfOkumaSirasi(unittest.TestCase):
             md, why = oku.pdf_to_markdown(b"%PDF-1.4")
         self.assertNotIn("-layout", seen["cmd"])
         self.assertIn("## Sayfa 2", md)
-        self.assertEqual(oku.CACHE_VERSION, "v5")      # eski -layout (v3) ve MathML-yinelemeli (v4) önbellekleri geçersiz
+        self.assertEqual(oku.CACHE_VERSION, "v6")      # eski -layout (v3), MathML-yinelemeli (v4) ve Blogger-gövdesiz (v5) önbellekleri geçersiz
 
 
 class MathMlYinelemesi(unittest.TestCase):
@@ -456,8 +456,29 @@ class MathMlYinelemesi(unittest.TestCase):
         self.assertNotIn("+3.3+3.3", md)
         self.assertNotIn("\\times", md)
 
-    def test_onbellek_surumu_v5(self):
-        self.assertEqual(oku.CACHE_VERSION, "v5")
+    def test_onbellek_surumu_v6(self):
+        self.assertEqual(oku.CACHE_VERSION, "v6")
+
+
+class BloggerGovdesi(unittest.TestCase):
+    """security.googleblog.com: makale <script type='text/template'> içinde HTML olarak durur; önceden yalnız başlık okunuyordu."""
+    PAGE = ("<html><body><div class='post'><h2 class='title'>A new path for Kyber on the web</h2><div class='post-body'>"
+            "<div class='post-content' itemprop='articleBody'><script type='text/template'><p>Chrome will offer a key share prediction for hybrid ML-KEM "
+            "(codepoint 0x11EC) in the next release of the browser.</p><ul><li>Chrome will switch from supporting Kyber to ML-KEM</li></ul>"
+            "<p>The final standard makes the older codepoint incompatible, so Chrome will not support both at the same time for several reasons.</p>"
+            "</script></div></div></div></body></html>")
+
+    def test_makale_govdesi_okunur(self):
+        _, blocks = oku.extract_blocks(self.PAGE)
+        md = oku.to_markdown(blocks)
+        self.assertIn("Chrome will offer a key share prediction for hybrid ML-KEM (codepoint 0x11EC)", md)
+        self.assertIn("A new path for Kyber on the web", md)
+
+    def test_rastgele_template_script_acilmaz(self):
+        page = ("<html><body><main><p>Gerçek metin burada duruyor ve yeterince uzun bir cümle olarak okunabilir olmalıdır tamam mı.</p>"
+                "<script type='text/template'><p>GİZLİ TEMPLATE İÇERİĞİ</p></script></main></body></html>")
+        _, blocks = oku.extract_blocks(page)
+        self.assertNotIn("GİZLİ TEMPLATE", oku.to_markdown(blocks))
 
 
 if __name__ == "__main__":

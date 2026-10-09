@@ -64,7 +64,7 @@ ROBOTS_MAX_PATTERN = 2048
 ROBOTS_MAX_RULES = 5000
 ROBOTS_ENABLED = os.environ.get("OKU_ROBOTS", "1") != "0"   # çalışan MCP'sine bu değişken geçmez (env izin listesi): çalışanlar HER ZAMAN uyar
 CACHE_TTL = 6 * 3600
-CACHE_VERSION = "v5"   # v5: MathML <annotation> (TeX kopyası) atılır: arXiv "+3.3+3.3" yinelemesi (v4: PDF okuma sırası)
+CACHE_VERSION = "v6"   # v6: Blogger <script type=text/template> makale gövdesi okunur (v5: MathML <annotation> atılır; v4: PDF okuma sırası)
 TEXT_TYPES = ("text/html", "application/xhtml+xml", "text/plain", "text/markdown", "text/x-markdown")
 INJECTION = re.compile(
     r"ignore (all |the )?(previous|prior|above) (instructions|prompts)|disregard (the )?(previous|above)|"
@@ -538,7 +538,18 @@ def _extract(page_html, use_hints):
     return html.unescape(ex.title).strip(), clean
 
 
+# Blogger (ör. security.googleblog.com): makale gövdesi <div itemprop="articleBody"> içindeki <script type="text/template">'te HTML olarak durur ve
+# tarayıcıda JavaScript ile gösterilir; script'ler atlandığı için sayfadan yalnız başlık geliyordu. Yalnız bu dar kalıp açılır (rastgele script değil).
+BLOGGER_BODY_RE = re.compile(r"(<[^>]*itemprop=['\"]articleBody['\"][^>]*>\s*)<script[^>]*type=['\"]text/template['\"][^>]*>(.*?)</script>",
+                             re.I | re.S)
+
+
+def unwrap_template_body(page_html):
+    return BLOGGER_BODY_RE.sub(lambda m: m.group(1) + "<article>" + m.group(2) + "</article>", page_html)
+
+
 def extract_blocks(page_html, use_hints=True):
+    page_html = unwrap_template_body(page_html)
     title, clean = _extract(page_html, use_hints)
     # Sınıf-adı sezgisi içeriği yutmuş olabilir: çıkarım çok kısaysa sezgisiz (yalnız etiket tabanlı) yeniden dene.
     if use_hints and sum(len(b["metin"]) for b in clean) < 400:

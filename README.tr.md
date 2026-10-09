@@ -277,13 +277,14 @@ Yazarın denemelerinde küçük bir konu, alt ajan başına yaklaşık 30 saniye
   - *İlk deneme (iki görev):* biten iki görev de çıktı sözleşmesini geçemedi ve `hatali/` klasörüne taşındı; komut satırı yedeği işe yarar bir teşhis vermeyen bir çıkış koduyla bitti. Kök neden ayrıştırılamadı.
   - *İkinci deneme (tek görev, orta efor, yalnız OpenCode):* not sözleşmeyi geçti (`rc=0`, dört benzersiz URL). Dört URL zayıf kaynak eşiğinin altında kaldığı için koşunun tamamı `73` koduyla bitti. İlk doğrulama 10 alıntının 9'unu doğruladı; onuncusu sayfadan yalnız noktalamayla ayrılıyordu (“FIPS 203” ile “(FIPS) 203”). Doğrulayıcı sonradan bunu *Kısmen* sayacak biçimde değiştirildi; canlı görev yeniden çalıştırılmadı.
   - *Üçüncü deneme (üç konu, düşük efor):* iki konuda OpenCode denemesi başarısız oldu (hız sınırı ya da adım bütçesi). Komut satırı yedeği kabul edilen notları üretti; böylece üçüncü taraf bir komut satırı arka ucu uçtan uca bir kez çalışmış oldu. O günkü doğrulayıcı 54 bulgunun 24'ünü doğruladı, 12'sini bulamadı. Güncel doğrulayıcı aynı notlarda 34'ü doğruladı ve 4'ünü bulunamadı bıraktı; bu 4'ünün ifadesi sayfadan gerçekten farklı. Geri kalanlar okunamayan sayfalardı (robots.txt engeli, sunucu hataları).
+  - *Dördüncü deneme (tek görev, orta efor, yalnız OpenCode, `min_url` verilmiş):* 87 sn'de 12 bulguyla bitti. O anki doğrulayıcı 7 doğrulandı, 1 kısmen, 4 bulunamadı dedi. Bu 4'ün ikisi kötü alıntı değil, okuyucu ya da doğrulayıcı zayıflığıydı: Google Security Blog makalesini bir script şablonunda tutuyor ve okuyucu onu açmıyordu; bir Firefox sayfasından neredeyse hiç metin gelmedi. İkisi de sonradan düzeltildi ya da *Erişilemedi* olarak etiketlendi (bkz. sürüm notları). Diğer ikisi sayfayla uyuşmadı (biri, artık RFC olan bir belgenin eski ifadesini aktarıyor).
   Birkaç çalıştırma güvenilirliği kanıtlamaz. Araştırma alt ajanlarını deneysel sayın ve küçük bir konuyla başlayın.
 
 ## Testler
 
 ```bash
-python3 arastir-ogren/scripts/test_arastir.py   # 165 test: ayrıştırma, sözleşme, devam, doğrulama, güven puanı, yapılandırma, MCP sunucusu
-python3 arastir-ogren/scripts/test_oku.py       # 52 test: ayıklama, BM25, önbellek, SSRF, yönlendirme, robots.txt, PDF
+python3 arastir-ogren/scripts/test_arastir.py   # 169 test: ayrıştırma, sözleşme, devam, doğrulama, güven puanı, yapılandırma, MCP sunucusu
+python3 arastir-ogren/scripts/test_oku.py       # 54 test: ayıklama, BM25, önbellek, SSRF, yönlendirme, robots.txt, PDF
 ```
 
 İki set de ağ erişimi olmadan çalışır.
@@ -318,6 +319,7 @@ Depoda henüz etiketli sürüm yok; kayıtlar en yeniden en eskiye, commit sıra
 - Doğrulayıcı: geçici bir nedenle (zaman aşımı, sunucu hatası, 429, robots.txt ağ hatası) okunamayan sayfa sırayla bir kez yeniden denenir; kalıcı hatalar (robots.txt engeli, 4xx, sertifika) denenmez.
 - Okuyucu: MathML `<annotation>` (formülün TeX kopyası) atılır; arXiv sayfaları artık `+3.3+3.3` diye okunmaz. Sayfa önbelleği sürümü v5 oldu; eski önbellekler bir kez atılır.
 - Denetim: "eski tarih" bayrağı bulgu başına satır yerine tek özet satırı oldu. Plan alanı `min_url`, zayıf kaynak eşiğini konu başına belirler. `rapor_kontrol.py`, kaynak gösterilen sayfalarda bir belge numarasının (`RFC 9309`, `FIPS 203`, `CVE-…`) geçmemesini artık uyarı saymaz. Araştırma çıktıları (`arastirma/`) git'e girmez. Testler: 165 + 52.
+- Dördüncü canlı denemede bulundu: okuyucu artık Blogger/Google Security Blog makale gövdesini açıyor (gövde `<script type="text/template">` içinde duruyor; yalnız bu dar kalıp açılır). Büyük bir HTML dosyasından çok az metin çıkarsa (20 KB'tan büyük HTML'den 800 karakterden az; çoğunlukla JavaScript ile yüklenen içerik), bulunamayan alıntı *Bulunamadı* yerine nedeniyle birlikte *Erişilemedi* olarak bildirilir. Sayfa metninde kalan satır içi HTML (`<u>…</u>` gibi) eşleştirmede yok sayılır. Sayfa önbelleği sürümü v6 oldu. Testler: 169 + 54.
 
 ### Rapor düzeyinde kaynak kontrolü ([`c88db28`](https://github.com/mesutbsdgn/quoteproof/commit/c88db28), [#4](https://github.com/mesutbsdgn/quoteproof/issues/4))
 
