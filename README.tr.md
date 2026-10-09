@@ -259,6 +259,9 @@ Denetim araçları için hiçbiri gerekmez. Araştırma alt ajanları için bir 
 **Bazı adlar neden Türkçe?**
 Araç, Türkçe bir iş akışı olarak başladı. Notlardaki bölüm adları (`Özet`, `Alıntılı bulgular`, …) ve komut satırı bayrakları Türkçedir; ayrıştırıcılar bu biçimi okur. *İçerik* herhangi bir dilde olabilir, alıntılar da her zaman kaynağın dilinde kalır.
 
+**Skill'siz yazılmış bir yanıtı denetleyebilir miyim?**
+Evet, hem de model jetonu harcamadan: `python3 scripts/rapor_kontrol.py yanit.md`. Yanıtın atıf yaptığı sayfaları okur (tam `https://…` adresleri, markdown bağlantıları ve şemasız `alan.adı/yol` adresleri); sayfada bulunmayan tırnaklı alıntıları, sayfada geçmeyen sayıları ve okunabilir hiçbir kaynağı olmayan yanıtları işaretler. Yanıtı denetlenebilir yapmak için isteğe tek cümle ekleyin: "Her olgunun yanına tam bir https:// URL'si ekle; mümkünse sayfadan 25 kelimeyi aşmayan, kelimesi kelimesine bir alıntı ver." Düz istem ve bu cümleyle yapılan bir denemede model URL kısmına iki görevin birinde uydu; yani denetim yine "denetlenemedi" diyebilir. Böyle bir cümle olmadan yazılmış düz bir yanıtta denetim, tırnak içine konmuş iki çeviriyi (gerçekte alıntı değil) yakaladı.
+
 **Maliyeti nedir?**
 İki dar konuda (her biri iki soru) küçük, düşük maliyetli bir modelle, ham olay kayıtlarından ölçüldü. Sağlayıcının önbelleğinden okunan girdi, taze girdiden çok daha ucuz fiyatlandığı için ayrı gösterilir.
 
@@ -294,7 +297,7 @@ Yazarın denemelerinde küçük bir konu, alt ajan başına yaklaşık 30 saniye
 ## Testler
 
 ```bash
-python3 arastir-ogren/scripts/test_arastir.py   # 178 test: ayrıştırma, sözleşme, devam, doğrulama, güven puanı, yapılandırma, MCP sunucusu
+python3 arastir-ogren/scripts/test_arastir.py   # 182 test: ayrıştırma, sözleşme, devam, doğrulama, güven puanı, yapılandırma, MCP sunucusu
 python3 arastir-ogren/scripts/test_oku.py       # 54 test: ayıklama, BM25, önbellek, SSRF, yönlendirme, robots.txt, PDF
 ```
 
@@ -334,6 +337,7 @@ Depoda henüz etiketli sürüm yok; kayıtlar en yeniden en eskiye, commit sıra
 - `rapor_kontrol.py`, raporda `http(s)://` ile başlayan hiç kaynak URL'si yoksa artık uyarır (`kubernetes.io/blog/…` gibi şemasız adresler okunmaz). Önceden böyle bir rapor hiçbir şey denetlenmediği hâlde "0 hata · 0 uyarı" diye çıkıyordu. Skill'li ve skill'siz koşuları karşılaştırırken bulundu. Testler: 171 + 54.
 - `--temiz-yaz`, alıntısı sayfada bulunamayan bulguyu çıkarır; ama aynı iddia notun özetinde yaşamaya devam edebilir. `DISLANAN.md` artık, çıkarılan bulguyla aynı sayıyı ya da tarihi taşıyan kalan satırları elle bakılmak üzere listeler (`PEP 779` gibi belge numaraları ve künye tarihleri yok sayılır). Çıkarılan "24 Mart 2026'da arşivlendi" alıntısı bu cümleyi özette bıraktığında bulundu. Testler: 174 + 54.
 - Dar konular için yeni `--hafif` kipi. Ham olay kayıtlarıyla ölçüldü: tam kip, düz isteme göre 3–7 kat jeton harcıyordu (arama başına 12–24 bin karakter sonuç, varsayılan sekiz sonuç, 10–15 aramalık bütçe; önbellekten okunan girdi taze girdiden çok daha ucuz fiyatlanır). `--hafif`, arama ve çağrı bütçesini soru sayısına ölçekler (arama = soru + 2, çağrı = 3 × soru + 2), aramada en çok dört sonuç ister ve adımı 12 ile sınırlar. Düz isteme yakın bitti (taze girdi yaklaşık 1,1 kat, çıktı 1,4–2 kat, süre 101–151 sn yerine 42–52 sn) ve aynı konularda 22 alıntının 19'unu birebir korudu. `calisma.json` artık her denemenin jeton dökümünü de kaydeder (`ayrinti`: taze, önbellek, çıktı, akıl yürütme). Testler: 178 + 54.
+- `rapor_kontrol.py` artık şemasız adresleri (`kubernetes.io/blog/…`) ve çıplak `(https://…)` adreslerini de okur; böylece skill'siz yazılmış bir yanıt bedavaya denetlenebilir. `app.kubernetes.io/name=…` gibi etiket seçiciler adres sayılmaz. Düz bir yanıtta tırnak içinde sunulmuş iki çeviriyi yakaladı. Testler: 182 + 54.
 
 ### Rapor düzeyinde kaynak kontrolü ([`c88db28`](https://github.com/mesutbsdgn/quoteproof/commit/c88db28), [#4](https://github.com/mesutbsdgn/quoteproof/issues/4))
 

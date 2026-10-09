@@ -259,6 +259,9 @@ The checking tools need none. The research workers need an agent runtime and an 
 **Why are some names Turkish?**
 The tool began as a Turkish-language workflow. Section names in notes (`Özet`, `Alıntılı bulgular`, …) and command-line flags are Turkish and are part of the format the parsers read; the *content* can be in any language, and quotes always stay in the source's language.
 
+**Can I check an answer that was written without the skill?**
+Yes, and it costs no model tokens: `python3 scripts/rapor_kontrol.py answer.md`. It reads the pages the answer cites (full `https://…` addresses, markdown links and scheme-less `domain.tld/path` addresses) and flags quoted passages that are not on the page, numbers that are not there, and answers with no readable source at all. To make an answer checkable, add one sentence to the request: "Give a full https:// URL with every fact and, where possible, a verbatim quote of at most 25 words from the page." In a test with a plain prompt plus that sentence, the model followed the URL part in one of two tasks, so the check can still come back with "cannot be checked". On a plain answer with no such sentence the check found two quoted passages that were in fact translations put between quotation marks.
+
 **What does it cost?**
 Measured on two narrow topics (two questions each) with a small low-cost model, from the raw event logs. Input read from the provider's cache is listed apart because it is billed far below fresh input.
 
@@ -294,7 +297,7 @@ In the author's runs, a small topic takes about 30 seconds per worker, and the a
 ## Tests
 
 ```bash
-python3 arastir-ogren/scripts/test_arastir.py   # 178 tests: parsing, contract, resume, verification, trust score, config, MCP server
+python3 arastir-ogren/scripts/test_arastir.py   # 182 tests: parsing, contract, resume, verification, trust score, config, MCP server
 python3 arastir-ogren/scripts/test_oku.py       # 54 tests: extraction, BM25, cache, SSRF, redirects, robots.txt, PDF
 ```
 
@@ -334,6 +337,7 @@ There is no tagged release yet; entries are listed newest first, by commit. Meas
 - `rapor_kontrol.py` now warns when a report contains no `http(s)://` source URL at all (scheme-less addresses such as `kubernetes.io/blog/…` are not read). Before, such a report came out as "0 errors · 0 warnings" although nothing had been checked. Found while comparing runs made with and without the skill. Tests: 171 + 54.
 - `--temiz-yaz` removes a finding whose quote is not on the page, but the same claim can live on in the note's summary. `DISLANAN.md` now lists the remaining lines that share a number or date with the removed finding (document numbers such as `PEP 779` and citation dates are ignored), so they can be checked by hand. Found when a removed "archived on 24 March 2026" quote left that sentence in the summary. Tests: 174 + 54.
 - New `--hafif` mode for narrow topics. Measured with raw event logs, the full mode used 3–7 times the tokens of a plain prompt (search results of 12–24 thousand characters each, eight results by default, a 10–15 search budget; the cached-input part is billed far lower than fresh input). `--hafif` scales the search and call budget to the number of questions (searches = questions + 2, calls = 3 × questions + 2), asks for at most four results per search and caps the steps at 12. It ended near the plain prompt (about 1.1× the fresh input, 1.4–2× the output, 42–52 s against 101–151 s) and kept 19 of 22 quotes verbatim on the same topics. `calisma.json` now also records each attempt's token breakdown (`ayrinti`: fresh, cached, output, reasoning). Tests: 178 + 54.
+- `rapor_kontrol.py` now also reads scheme-less addresses (`kubernetes.io/blog/…`) and bare `(https://…)` addresses, so an answer written without the skill can be checked for free. Label selectors such as `app.kubernetes.io/name=…` are not taken for addresses. On a plain answer it found two translations presented as quotations. Tests: 182 + 54.
 
 ### Report-level source check ([`c88db28`](https://github.com/mesutbsdgn/quoteproof/commit/c88db28), [#4](https://github.com/mesutbsdgn/quoteproof/issues/4))
 

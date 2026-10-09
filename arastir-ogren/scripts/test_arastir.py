@@ -1588,7 +1588,7 @@ class KalanIddiaUyarisi(unittest.TestCase):
 class DenetlenemediUyarisi(unittest.TestCase):
     """Şemasız adresli rapor ("kubernetes.io/blog/…") 0 sayfa okutuyordu ve "0 hata" diye temiz görünüyordu (9 Ekim 2026, canlı karşılaştırma)."""
     def test_kaynak_urlsi_olmayan_rapor_uyari_alir(self):
-        res = rapor_kontrol.run("Duyuru kubernetes.io/blog/2025/11/11/x adresinde: bakım Mart 2026'da bitiyor.", loader=lambda u: {"ok": False, "markdown": "", "hata": "x"})
+        res = rapor_kontrol.run("Duyuru kubernetes.io adresinde (yol yok): bakım Mart 2026'da bitiyor.", loader=lambda u: {"ok": False, "markdown": "", "hata": "x"})
         self.assertEqual(res["url_sayisi"], 0)
         self.assertTrue(any(f["tur"] == "denetlenemedi" and f["seviye"] == "uyarı" for f in res["ekstra"]))
         self.assertIn("Temiz çıktı bu rapor için bir şey söylemez", rapor_kontrol.render(res, "r.md"))
@@ -1596,6 +1596,34 @@ class DenetlenemediUyarisi(unittest.TestCase):
     def test_urlli_raporda_uyari_yok(self):
         page = {"ok": True, "markdown": "Maintenance will continue until March 2026 for the project in this repository page text.", "hata": ""}
         res = rapor_kontrol.run('- Bakım — "Maintenance will continue until March 2026" — [K](https://k.example/x)', loader=lambda u: page)
+        self.assertFalse(any(f["tur"] == "denetlenemedi" for f in res["ekstra"]))
+
+
+class SemasizAdres(unittest.TestCase):
+    def test_semasiz_alan_adi_yol_tamamlanir(self):
+        f = rapor_kontrol.add_url_scheme
+        self.assertEqual(f("bkz. kubernetes.io/blog/2025/11/11/ingress-nginx-retirement/ ve (github.com/kubernetes/ingress-nginx)."),
+                         "bkz. https://kubernetes.io/blog/2025/11/11/ingress-nginx-retirement/ ve ( https://github.com/kubernetes/ingress-nginx).")
+
+    def test_etiket_secici_adres_sayilmaz_ve_parantezli_adres_okunur(self):
+        f = rapor_kontrol.add_url_scheme
+        self.assertEqual(f("kubectl get pods --selector app.kubernetes.io/name=ingress-nginx"), "kubectl get pods --selector app.kubernetes.io/name=ingress-nginx")
+        self.assertEqual(f("bkz. (https://a.example.org/x) ve [m](https://b.example.org/y)"), "bkz. ( https://a.example.org/x) ve [m](https://b.example.org/y)")
+        self.assertEqual(rapor_kontrol.denetle.bullet_urls(f("bkz. (kubernetes.io/blog/x/)")), ["https://kubernetes.io/blog/x/"])
+
+    def test_mevcut_https_dosya_yolu_surum_ve_tek_alan_adi_degismez(self):
+        f = rapor_kontrol.add_url_scheme
+        for ok in ("https://peps.python.org/pep-0779/", "http://a.example.org/x", "docs.python.org tek başına", "sürüm 3.14/3.15 ve v1.2/rc", "dosya src/main.py",
+                   "e.g./data", "mail: ad@site.com/yol"):
+            self.assertEqual(f(ok), ok)
+
+    def test_run_semasiz_adresli_yaniti_denetler(self):
+        page = {"ok": True, "markdown": "Best-effort maintenance will continue until March 2026 for the project, said the retirement announcement page.", "hata": ""}
+        seen = []
+        res = rapor_kontrol.run('- Bakım — "Best-effort maintenance will continue until March 2026" — kubernetes.io/blog/2025/11/11/ingress-nginx-retirement/',
+                                loader=lambda u: (seen.append(u), page)[1])
+        self.assertEqual(res["url_sayisi"], 1)
+        self.assertEqual(seen, ["https://kubernetes.io/blog/2025/11/11/ingress-nginx-retirement/"])
         self.assertFalse(any(f["tur"] == "denetlenemedi" for f in res["ekstra"]))
 
 

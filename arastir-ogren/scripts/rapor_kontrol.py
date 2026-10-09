@@ -215,9 +215,25 @@ def check_item(item, pool, bases, own_urls, readable_pool, all_readable=None):
     return out
 
 
+BARE_URL_RE = re.compile(r"(?<![\w/@.:-])((?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+(?:com|org|net|io|dev|gov|edu|int|app|ai|co|info|tr|uk|de|eu)(?:\.[a-z]{2})?/[^\s)>\]\"'`,;]+)", re.I)
+
+
+def add_url_scheme(text):
+    """Şemasız "alan.adı/yol" adreslerini ("kubernetes.io/blog/2025/11/11/x/") https:// ile tamamlar: skill'siz yazılmış yanıtlar URL'yi çoğu zaman böyle verir
+    ve araç hiçbir sayfayı okumuyordu. Yalnız YOL içerenler (alan adı tek başına belirsiz) ve bilinen alan uzantılarıyla; dosya yolu/sürüm gibi şeyler eşleşmez."""
+    def fix(m):
+        bare = m.group(1).rstrip(".:")
+        path = bare.split("/", 1)[1]
+        if "=" in path and "?" not in path:   # "app.kubernetes.io/name=ingress-nginx": etiket seçici, adres değil
+            return m.group(0)
+        return "https://" + bare
+    text = BARE_URL_RE.sub(fix, text)
+    return re.sub(r"(?<!\])\((https?://)", r"( \1", text)   # "(https://x)": araç yalnız [metin](url) ve boşlukla ayrılmış çıplak adresleri okur
+
+
 def run(report_text, cache_dir=None, notes_urls=None, hints=None, jobs=4, loader=None):
     loader = loader or (lambda u: oku.load(u, cache_dir=cache_dir))
-    items = parse_items(report_text)
+    items = parse_items(add_url_scheme(report_text))
     item_urls = [[u.rstrip(".,;)") for u in denetle.bullet_urls(it["metin"])] for it in items]
     all_urls = list(dict.fromkeys(u for urls in item_urls for u in urls))[:MAX_POOL]
     note_only = [u for u in dict.fromkeys(notes_urls or []) if u not in all_urls][:MAX_POOL]   # yalnız "terim başka sayfada geçiyor mu" için
