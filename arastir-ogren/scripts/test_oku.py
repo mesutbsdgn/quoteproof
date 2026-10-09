@@ -481,5 +481,22 @@ class BloggerGovdesi(unittest.TestCase):
         self.assertNotIn("GİZLİ TEMPLATE", oku.to_markdown(blocks))
 
 
+class AcceptHeader(unittest.TestCase):
+    def test_accept_joker_icerir_katı_sunucu_pdf_e_406_vermesin(self):
+        seen = {}
+        class Resp:
+            status, headers = 200, {"Content-Type": "text/plain"}
+            def close(self): pass
+            def read(self, n=-1): return b""
+        def fake_send(opener, req, timeout):
+            seen["accept"] = req.get_header("Accept")
+            return Resp()
+        with mock.patch.object(oku, "_send", fake_send), mock.patch.object(oku, "check_url", return_value=["93.184.216.34"]), \
+             mock.patch.object(oku, "_throttle"):
+            oku.request("https://nvlpubs.example/x.pdf", robots=False)
+        self.assertIn("*/*", seen["accept"])
+        self.assertTrue(seen["accept"].startswith("text/markdown"))      # markdown yine tercih edilir
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)

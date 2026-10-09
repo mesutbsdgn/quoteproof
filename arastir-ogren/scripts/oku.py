@@ -191,7 +191,8 @@ def request(url, method="GET", headers=None, read_body=True, timeout=TIMEOUT, to
             if not allowed:
                 raise RobotsBlocked(why)
         _throttle(urllib.parse.urlparse(current).hostname)
-        hdr = {"User-Agent": UA, "Accept": "text/markdown, text/html;q=0.9, text/plain;q=0.5", "Accept-Language": "tr,en;q=0.8"}
+        # "*/*;q=0.1" şart: yalnız markdown/html/text sayan katı sunucular PDF/başka türe HTTP 406 verir (NIST nvlpubs, 9 Eki 2026); markdown yine tercih edilir
+        hdr = {"User-Agent": UA, "Accept": "text/markdown, text/html;q=0.9, text/plain;q=0.5, */*;q=0.1", "Accept-Language": "tr,en;q=0.8"}
         hdr.update(headers or {})
         resp = _send(opener, urllib.request.Request(current, method=method, headers=hdr), max(1.0, min(timeout, total - (time.monotonic() - started))))
         status = getattr(resp, "status", None) or resp.code
