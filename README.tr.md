@@ -102,6 +102,7 @@ Her bulgu satırında dört öğe bulunur: **iddia**, **birebir alıntı**, **bu
 | `mcp_oku.py` | Okuyucuyu alt ajanlara küçük bir MCP sunucusu olarak sunar | 0 jeton |
 | `guven.py` | 0–100 arası sezgisel kaynak güvenilirlik puanı | 0 jeton |
 | `rapor_kontrol.py` | **Son raporu**, kaynak gösterdiği sayfalarla karşılaştırır: yanlış özneye bağlanmış sayıları, birebir olmayan alıntıları ve araştırma notlarında hiç geçmeyen kaynakları yakalar | 0 jeton |
+| `kapsama.py` | Planda listelenen beklenen anahtar olguları (`olgular`) doğrulanmış bulgularla karşılaştırır: "kapsama 9/12, eksik: …"; yalnız eksik olguları soran bir ek plan yazar | 0 jeton |
 | `uzlas.py` | Aynı konunun birkaç bağımsız çalıştırmasının doğrulanmış notlarını birleştirir: hangi iddia kaç çalıştırmada bulundu, yalnız tek çalıştırmanın bulduğu ne, ve bulguları `[k/N çalıştırma]` taşıyan birleşik not | 0 jeton |
 | `rapor_olc.py` | İki raporu aynı ölçütlerle ölçer (sözcük, başlık, kaynak, boşluk) | 0 jeton |
 
@@ -218,6 +219,18 @@ python3 $S/dogrula.py arastirmam/notlar --plan PLAN.json --temiz-yaz arastirmam/
 
 `kaynaklar` alanına beklediğiniz kaynakları yazarsanız alt ajan doğru yöne yönelir ve bu alan adları +10 güven puanı alır.
 
+İsterseniz `olgular` alanına beklediğiniz anahtar olguları yazın (çalışana hiç gösterilmez; yalnız ölçüm içindir):
+
+```json
+"olgular": [
+  {"ad": "Konsey PEP'i 16 Haziran 2025'te kabul etti", "ara": "16[- ]?(Jun|June|Haziran)|accepts PEP"},
+  {"ad": "uzantı modülleri GIL'i yeniden açabilir", "ara": ["re-enable the GIL", "GIL yeniden"]},
+  "tek iş parçacığı cezası yaklaşık %5-10 :: 5-10%"
+]
+```
+
+`ara`, büyük/küçük harf duyarsız bir düzenli ifadedir (ya da liste; biri yeter). Bir olgu, doğrulanmış "Alıntılı bulgular" satırlarından birinde eşleşirse kapsanmış sayılır; özet ve boşluklar bölümü hiçbir zaman sayılmaz.
+
 Bilerek dar tutulan bir konuya `"min_url": 3` ekleyebilirsiniz (3 ile 30 arasında bir tam sayı). Bundan az benzersiz URL içeren not zayıf sayılır (çıkış kodu `73`); varsayılan eşik 8'dir.
 
 ### Araçları tek başına kullanın
@@ -261,7 +274,10 @@ Denetim araçları için hiçbiri gerekmez. Araştırma alt ajanları için bir 
 Araç, Türkçe bir iş akışı olarak başladı. Notlardaki bölüm adları (`Özet`, `Alıntılı bulgular`, …) ve komut satırı bayrakları Türkçedir; ayrıştırıcılar bu biçimi okur. *İçerik* herhangi bir dilde olabilir, alıntılar da her zaman kaynağın dilinde kalır.
 
 **Skill'siz yazılmış bir yanıtı denetleyebilir miyim?**
-Evet, hem de model jetonu harcamadan: `python3 scripts/rapor_kontrol.py yanit.md`. Yanıtın atıf yaptığı sayfaları okur (tam `https://…` adresleri, markdown bağlantıları ve şemasız `alan.adı/yol` adresleri); sayfada bulunmayan tırnaklı alıntıları, sayfada geçmeyen sayıları ve okunabilir hiçbir kaynağı olmayan yanıtları işaretler. Yanıtı denetlenebilir yapmak için isteğe tek cümle ekleyin: "Her olgunun yanına tam bir https:// URL'si ekle; mümkünse sayfadan 25 kelimeyi aşmayan, kelimesi kelimesine bir alıntı ver." Düz istem ve bu cümleyle yapılan bir denemede yanıtlar iki görevde de denetlenebilir çıktı (6 ve 8 tırnaklı alıntı, 5 ve 8 adres; denetim sayfada bulunmayan 2 ve 1 alıntı yakaladı), maliyet yaklaşık düz istem kadardı. Cümleyi yok sayan bir model yine "denetlenemedi" sonucu verir. Böyle bir cümle olmadan yazılmış düz bir yanıtta denetim, tırnak içine konmuş iki çeviriyi (gerçekte alıntı değil) yakaladı.
+Evet, hem de model jetonu harcamadan: `python3 scripts/rapor_kontrol.py yanit.md`. Yanıtın kaynak gösterdiği sayfaları okur (tam `https://…` adresleri, markdown bağlantıları ve şemasız `alan.adı/yol` adresleri). Sayfada bulunmayan tırnaklı alıntıları, sayfada geçmeyen sayıları ve okunabilir hiçbir kaynağı olmayan yanıtları işaretler. Yanıtı denetlenebilir yapmak için isteğe tek bir cümle ekleyin: "Her olgunun yanına tam bir https:// URL'si ekle; mümkünse sayfadan 25 kelimeyi aşmayan, kelimesi kelimesine bir alıntı ver." Düz istem ve bu cümleyle yapılan bir denemede yanıtlar iki görevde de denetlenebilir çıktı (6 ve 8 tırnaklı alıntı, 5 ve 8 adres; denetim sayfada bulunmayan 2 ve 1 alıntı yakaladı), maliyet yaklaşık düz istem kadardı. Cümleyi yok sayan bir model yine "denetlenemedi" sonucu verir. Böyle bir cümle olmadan yazılmış düz bir yanıtta denetim, tırnak içine konmuş iki çeviriyi (gerçekte alıntı değil) yakaladı.
+
+**Sonucun eksiksiz olduğunu nasıl anlarım?**
+Beklediğiniz anahtar olguları plana yazın (`olgular`, yukarıya bakın). Çalıştırma bittiğinde hat `kapsama.md` ("kapsama 7/12, eksik: …") ve `eksik-PLAN.json` dosyalarını yazar. İkincisi, aynı konunun yalnız eksik olguları soran ek planıdır (en çok üç soru, fazlası son soruda birleşir; soru sayısı arama bütçesini, dolayısıyla maliyeti belirler). Ek planı başka bir klasöre `--hafif` ile çalıştırın, sonra `python3 scripts/uzlas.py ILK/notlar-temiz EK/notlar-temiz --plan PLAN.json --yaz birlesik/` ile birleştirin; rapor her olguyu ve onu bulan çalıştırmaları gösterir. Bir denemede tek `--hafif` çalıştırma beklenen olguların 12'de 7'sini ve 13'te 7'sini kapsadı; hedefli ek çalıştırma (yaklaşık 81 bin ve 157 bin jeton) birleşik notları 12'de 11'e ve 13'te 12'ye çıkardı, birleşik 33 bulgunun 33'ü doğrulandı. Aynı modelin üç kör tekrarı yaklaşık aynı maliyetle 12'de 9'a ve 13'te 11'e varmıştı. Olgu listelerini önceki çalıştırmaların bulduklarından yazdım; bu yüzden sayılar yöntemin lehine. Önceden yazdığınız bir listede sayfalarda bulunmayan olgular da olur (onlar eksik kalır; bunu bilmek de işe yarar). Birleşik not her iddia için tek temsilci bulgu tuttuğundan bir olgu birleşik notun kendi kapsamasından düşebilir (bir durumda 12'de 10).
 
 **Daha eksiksiz ve daha tutarlı sonucu nasıl alırım?**
 Konuyu birden çok kez koşturup birleştirin. Tek bir çalıştırma konunun anahtar olgularının yaklaşık %80'ini buldu ve çalıştırmadan çalıştırmaya çok değişti (beş çalıştırmanın en zayıfı 12 olgudan 8'ini, en iyisi 12'sini buldu). İki konuda iki çalıştırmanın birleşimi yaklaşık %91–92'yi, üç çalıştırmanın birleşimi yaklaşık %95–96'yı kapsadı (olgu listelerini çalıştırmaların bulduklarından elle çıkardım; bu yüzden bunlar bir ölçüt değil, yaklaşık değerlerdir). `--hafif` ile bir çalıştırma düz istem kadar maliyetli olduğundan üç çalıştırma, tam kipte bir çalıştırma kadar tutar. Her çalıştırmayı ayrı bir klasöre alın, sonra `python3 scripts/uzlas.py KOSU1/notlar-temiz KOSU2/notlar-temiz KOSU3/notlar-temiz --cikti uzlasi.md --yaz birlesik/` çalıştırın. Birleşik notlar `dogrula.py`'den yeniden geçer (denemede 35'in 35'i doğrulandı) ve her bulgu `[k/N çalıştırma]` taşır; yalnız tek çalıştırmanın bulduğu iddia "tek başına güvenme" diye listelenir. Mümkünse iki farklı model karıştırın: aynı modelin çalıştırmaları birbirinin boşluğunu tekrarlar. Bir denemede aynı modelin üç tekrarı yine de anahtar olguların 12'de 9'unu ve 13'te 11'ini kapsadı; tekrarlardan birini farklı bir modelle değiştirmek ortalama bir olgu daha ekledi (iki konuda 0,6 ile 1,3 arası; birinde hiç eklemedi). Plana birincil kaynak sayfalarını sabitlemek tutarlılığı güvenilir biçimde değiştirmedi (biraz daha ucuzdu).
@@ -301,7 +317,7 @@ Yazarın denemelerinde küçük bir konu, alt ajan başına yaklaşık 30 saniye
 ## Testler
 
 ```bash
-python3 arastir-ogren/scripts/test_arastir.py   # 187 test: ayrıştırma, sözleşme, devam, doğrulama, güven puanı, yapılandırma, MCP sunucusu
+python3 arastir-ogren/scripts/test_arastir.py   # 194 test: ayrıştırma, sözleşme, devam, doğrulama, güven puanı, yapılandırma, MCP sunucusu
 python3 arastir-ogren/scripts/test_oku.py       # 54 test: ayıklama, BM25, önbellek, SSRF, yönlendirme, robots.txt, PDF
 ```
 
@@ -343,6 +359,7 @@ Depoda henüz etiketli sürüm yok; kayıtlar en yeniden en eskiye, commit sıra
 - Dar konular için yeni `--hafif` kipi. Ham olay kayıtlarıyla ölçüldü: tam kip, düz isteme göre 3–7 kat jeton harcıyordu (arama başına 12–24 bin karakter sonuç, varsayılan sekiz sonuç, 10–15 aramalık bütçe; önbellekten okunan girdi taze girdiden çok daha ucuz fiyatlanır). `--hafif`, arama ve çağrı bütçesini soru sayısına ölçekler (arama = soru + 2, çağrı = 3 × soru + 2), aramada en çok dört sonuç ister ve adımı 12 ile sınırlar. Düz isteme yakın bitti (taze girdi yaklaşık 1,1 kat, çıktı 1,4–2 kat, süre 101–151 sn yerine 42–52 sn) ve aynı konularda 22 alıntının 19'unu birebir korudu. `calisma.json` artık her denemenin jeton dökümünü de kaydeder (`ayrinti`: taze, önbellek, çıktı, akıl yürütme). Testler: 178 + 54.
 - `rapor_kontrol.py` artık şemasız adresleri (`kubernetes.io/blog/…`) ve çıplak `(https://…)` adreslerini de okur; böylece skill'siz yazılmış bir yanıt bedavaya denetlenebilir. `app.kubernetes.io/name=…` gibi etiket seçiciler adres sayılmaz. Düz bir yanıtta tırnak içinde sunulmuş iki çeviriyi yakaladı. Testler: 182 + 54.
 - Yeni `uzlas.py` (uzlaşı): birkaç bağımsız çalıştırmanın doğrulanmış notlarını birleştirir, her iddianın kaç çalıştırmada bulunduğunu sayar, yalnız tek çalıştırmanın bulduklarını listeler ve her bulgusu `[k/N çalıştırma]` taşıyan, `dogrula.py`'den yeniden geçen birleşik not yazar. Aynı konunun çalıştırmaları arasındaki farktan doğdu (bir çalıştırma anahtar olguların yaklaşık %80'ini, en zayıfı 12'de 8'ini buldu). Testler: 187 + 54.
+- Yeni `kapsama.py` ve plan alanı `olgular` (beklenen anahtar olgular; çalışana hiç gösterilmez): hat "kapsama 7/12, eksik: …" der, eksik olgular için ek plan yazar, `uzlas.py --plan` hangi çalıştırmanın hangi olguyu bulduğunu gösterir. Tek çalıştırmanın bir konunun anahtar olgularının yalnızca ≈ %62–85'ini bulduğu ve aynı modelin kör tekrarlarının doyduğu ölçüldükten sonra eklendi. Testler: 194 + 54.
 
 ### Rapor düzeyinde kaynak kontrolü ([`c88db28`](https://github.com/mesutbsdgn/quoteproof/commit/c88db28), [#4](https://github.com/mesutbsdgn/quoteproof/issues/4))
 

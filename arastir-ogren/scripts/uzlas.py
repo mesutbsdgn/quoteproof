@@ -23,6 +23,8 @@ sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import denetle  # noqa: E402
 import dogrula  # noqa: E402
+import json  # noqa: E402
+import kapsama  # noqa: E402
 
 OVERLAP_SAME = 0.6          # alıntı sözcük örtüşmesi (küçük kümeye göre): bu ve üstü → aynı iddia
 OVERLAP_SAME_PAGE = 0.35    # aynı sayfada: bu örtüşme ya da ortak sayı yeter
@@ -162,6 +164,7 @@ def main(argv=None):
     ap.add_argument("--cikti", help="rapor dosyası (varsayılan: ekrana)")
     ap.add_argument("--yaz", help="birleşik notların yazılacağı dizin")
     ap.add_argument("--etiket", help="çalıştırma etiketleri, virgülle (varsayılan: dizin adlarından)")
+    ap.add_argument("--plan", help="PLAN.json: `olgular` varsa olgu başına kaç çalıştırmada bulunduğu ve birleşim kapsaması da yazılır")
     args = ap.parse_args(argv)
     for d in args.dizinler:
         if not Path(d).is_dir():
@@ -176,6 +179,14 @@ def main(argv=None):
         print("uzlas: hiçbir not bulunamadı", file=sys.stderr)
         return 2
     report = render(res)
+    if args.plan:
+        try:
+            plan = json.loads(Path(args.plan).read_text(encoding="utf-8"))
+            kres = kapsama.run(plan, args.dizinler, labels or None)
+        except (OSError, json.JSONDecodeError, kapsama.OlguHatasi) as e:
+            print(f"uzlas: --plan okunamadı/geçersiz: {e}", file=sys.stderr)
+            return 2
+        report += "\n" + kapsama.render(kres)
     if args.cikti:
         Path(args.cikti).write_text(report, encoding="utf-8")
     else:

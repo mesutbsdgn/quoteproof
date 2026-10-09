@@ -1611,6 +1611,117 @@ class Uzlasi(unittest.TestCase):
             self.assertIn("[2/2 çalıştırma]", (yaz / "konu.md").read_text(encoding="utf-8"))
 
 
+import kapsama  # noqa: E402
+
+
+class AnahtarOlguKapsamasi(unittest.TestCase):
+    """Kapsama yalnız BEKLENEN olgulara karşı ölçülür (tek çalıştırma ≈ %62–85 buluyordu, tekrarlar farklı olguları kaçırıyordu)."""
+    ITEM = {"slug": "konu", "konu": "k", "sorular": ["s?"], "kaynaklar": "x", "kisitlar": "y", "min_url": 4,
+            "olgular": [{"ad": "bakım Mart 2026'ya kadar", "ara": "March 2026"},
+                        {"ad": "yama/sürüm yok", "ara": ["no further releases", "no bugfixes"]},
+                        "arşivlendi :: archived",
+                        {"ad": "JIT desteklenmez", "ara": r"\bJIT\b"}]}
+
+    def _not(self, bulgular, gap=""):
+        s = "# k\n## S\n### Özet\nÖzette March 2026 ve archived geçse de sayılmaz.\n### Alıntılı bulgular\n"
+        s += "".join(f'- {c} — "{q}" — [K](https://k.example/{i}) (2026, birincil)\n' for i, (c, q) in enumerate(bulgular))
+        return s + f"### Çıkarımlar\n- c\n### Boşluklar\n- {gap or 'yok'}\n"
+
+    def _dirs(self, d, notes):
+        out = []
+        for name, text in notes:
+            p = Path(d) / name / "notlar-temiz"; p.mkdir(parents=True); (p / "konu.md").write_text(text, encoding="utf-8"); out.append(str(p))
+        return out
+
+    def test_olgu_bicimleri_ve_hatalar(self):
+        o = kapsama.olgulari_oku(self.ITEM)
+        self.assertEqual([x["ad"] for x in o], ["bakım Mart 2026'ya kadar", "yama/sürüm yok", "arşivlendi", "JIT desteklenmez"])
+        self.assertEqual(o[1]["ara"], "(?:no further releases)|(?:no bugfixes)")
+        self.assertEqual(kapsama.olgulari_oku({}), [])
+        for bad in ({"olgular": "x"}, {"olgular": ["ad yok"]}, {"olgular": [{"ad": "a", "ara": "("}]}, {"olgular": [{"ad": "", "ara": "x"}]},
+                    {"olgular": [{"ad": "a", "ara": []}]}, {"olgular": [5]}, {"olgular": [{"ad": "a", "ara": "x"}] * 41}):
+            with self.assertRaises(kapsama.OlguHatasi):
+                kapsama.olgulari_oku(bad)
+
+    def test_yalniz_alintili_bulgularda_eslesir_ozet_ve_bosluk_sayilmaz(self):
+        text = self._not([("Takvim", "Best-effort maintenance will continue until March 2026")], gap="JIT desteği doğrulanamadı")
+        with tempfile.TemporaryDirectory() as d:
+            res = kapsama.run([self.ITEM], self._dirs(d, [("r1", text)]))
+        r = res["konu"]
+        self.assertEqual((r["kapsanan"], r["toplam"]), (1, 4))
+        covered = {x["ad"] for x in r["olgular"] if x["kapsayan"]}
+        self.assertEqual(covered, {"bakım Mart 2026'ya kadar"})        # "archived" Özet'te, "JIT" Boşluklar'da: sayılmadı
+
+    def test_birden_cok_calistirma_olgu_basina_sayar_ve_birlesimi_verir(self):
+        a = self._not([("Takvim", "Best-effort maintenance will continue until March 2026"), ("Yok", "There will be no further releases of any kind")])
+        b = self._not([("Takvim", "maintenance until March 2026 only"), ("Arşiv", "The repository was archived by the owner")])
+        with tempfile.TemporaryDirectory() as d:
+            res = kapsama.run([self.ITEM], self._dirs(d, [("r1", a), ("r2", b)]))
+        r = res["konu"]
+        self.assertEqual((r["kapsanan"], r["toplam"]), (3, 4))
+        by = {x["ad"]: x["kapsayan"] for x in r["olgular"]}
+        self.assertEqual(by["bakım Mart 2026'ya kadar"], ["r1", "r2"])
+        self.assertEqual(by["yama/sürüm yok"], ["r1"])
+        self.assertEqual(by["arşivlendi"], ["r2"])
+        self.assertEqual(r["etiket_kapsama"], {"r1": 2, "r2": 2})
+        rep = kapsama.render(res)
+        self.assertIn("3/4 olgu kapsandı (%75)", rep)
+        self.assertIn("| ✗ | JIT desteklenmez |", rep)
+        self.assertIn("2/2 (r1, r2)", rep)
+
+    def test_eksik_plan_ayni_slug_yalniz_eksikleri_sorar_ve_altisini_asarsa_birlestirir(self):
+        with tempfile.TemporaryDirectory() as d:
+            res = kapsama.run([self.ITEM], self._dirs(d, [("r1", self._not([("Takvim", "until March 2026 maintenance")]))]))
+        ep = kapsama.eksik_plan(res)
+        self.assertEqual(len(ep), 1)
+        self.assertEqual(ep[0]["slug"], "konu")
+        self.assertEqual(len(ep[0]["sorular"]), 3)
+        self.assertIn("JIT desteklenmez", " ".join(ep[0]["sorular"]))
+        self.assertIn("YALNIZ şu eksik olguları bul", ep[0]["amac"])
+        self.assertEqual({o["ad"] for o in ep[0]["olgular"]}, {"yama/sürüm yok", "arşivlendi", "JIT desteklenmez"})
+        self.assertEqual(ep[0]["min_url"], 3)
+        many = {"slug": "m", "konu": "k", "sorular": ["s"], "olgular": [{"ad": f"olgu{i}", "ara": f"zzz{i}"} for i in range(9)]}
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "r" / "notlar-temiz"; p.mkdir(parents=True); (p / "m.md").write_text(self._not([("a", "b b b b b b")]), encoding="utf-8")
+            ep2 = kapsama.eksik_plan(kapsama.run([many], [str(p)]))
+        self.assertEqual(len(ep2[0]["sorular"]), kapsama.EK_SORU_SINIRI)
+        self.assertIn("olgu8", ep2[0]["sorular"][-1])
+
+    def test_plan_dogrulamasi_olgu_hatasini_yakalar(self):
+        ok = [{"slug": "a", "konu": "k", "sorular": ["s?"], "olgular": [{"ad": "x", "ara": "y"}]}]
+        self.assertEqual(arastir.validate(ok), [])
+        bad = [{"slug": "a", "konu": "k", "sorular": ["s?"], "olgular": [{"ad": "x", "ara": "("}]}]
+        self.assertTrue(any("regex geçersiz" in e for e in arastir.validate(bad)))
+
+    def test_cli_esik_cikis_kodu_ve_ek_plan_dosyasi(self):
+        with tempfile.TemporaryDirectory() as d:
+            dirs = self._dirs(d, [("r1", self._not([("Takvim", "until March 2026 maintenance")]))])
+            plan = Path(d) / "p.json"; plan.write_text(json.dumps([self.ITEM]), encoding="utf-8")
+            out, ep = Path(d) / "k.md", Path(d) / "ek.json"
+            with contextlib.redirect_stderr(io.StringIO()), contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(kapsama.main([str(plan), dirs[0], "--cikti", str(out), "--eksik-plan", str(ep)]), 1)   # 1/4 < 0,6
+                self.assertEqual(kapsama.main([str(plan), dirs[0], "--esik", "0.2"]), 0)
+                self.assertEqual(kapsama.main([str(Path(d) / "yok.json"), dirs[0]]), 2)
+                self.assertEqual(kapsama.main([str(plan), "/yok/dizin"]), 2)
+            self.assertIn("1/4 olgu kapsandı", out.read_text(encoding="utf-8"))
+            self.assertEqual(json.loads(ep.read_text(encoding="utf-8"))[0]["slug"], "konu")
+
+    def test_uzlas_plan_ile_olgu_kapsamasini_rapora_ekler(self):
+        a = self._not([("Takvim", "Best-effort maintenance will continue until March 2026")])
+        b = self._not([("Arşiv", "The repository was archived by the owner")])
+        with tempfile.TemporaryDirectory() as d:
+            dirs = self._dirs(d, [("r1", a), ("r2", b)])
+            plan = Path(d) / "p.json"; plan.write_text(json.dumps([self.ITEM]), encoding="utf-8")
+            out = Path(d) / "u.md"
+            with contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(uzlas.main([*dirs, "--plan", str(plan), "--cikti", str(out)]), 0)
+                self.assertEqual(uzlas.main([*dirs, "--plan", str(Path(d) / "yok.json")]), 2)
+            rep = out.read_text(encoding="utf-8")
+        self.assertIn("# Uzlaşı raporu", rep)
+        self.assertIn("# Anahtar olgu kapsaması", rep)
+        self.assertIn("2/4 olgu kapsandı (%50)", rep)
+
+
 class HafifKip(unittest.TestCase):
     """Canlı ölçüm (9 Ekim 2026, ucuz model): tam kip doğrudan koşunun 3–7 katı jeton harcıyordu (arama sonuçları 12–24 bin karakter/arama, 8 sonuç,
     10–15 aramalık bütçe); --hafif doğrudan koşuya yakın kaldı ve alıntı doğrulamasını korudu."""

@@ -33,6 +33,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import ayar  # noqa: E402
+import kapsama  # noqa: E402
 
 TEMPLATE = HERE.parent / "references" / "arastirmaci-istemi.md"
 SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,40}$")
@@ -208,6 +209,10 @@ def validate(plan):
         for key in ("amac", "kaynaklar", "kisitlar"):
             if key in item and not isinstance(item[key], str):
                 errors.append(f"#{i}: '{key}' metin olmalı")
+        try:
+            kapsama.olgulari_oku(item)
+        except kapsama.OlguHatasi as e:
+            errors.append(f"#{i}: {e}")
         if "min_url" in item and not (isinstance(item["min_url"], int) and not isinstance(item["min_url"], bool) and MIN_URLS <= item["min_url"] <= 30):
             errors.append(f"#{i}: 'min_url' {MIN_URLS} ile 30 arasında tam sayı olmalı (bu konu için 'zayıf not' eşiği; varsayılan {WEAK_URLS})")
     return errors
@@ -690,6 +695,21 @@ def main():
         if rc != 0:
             print(f"arastir: UYARI dogrula.py çıkış kodu {rc}; otomatik doğrulama YAPILMADI, iddiaları elle doğrulayın", file=sys.stderr)
             code = max(code, 72)
+    if any(it.get("olgular") for it in plan):   # beklenen olgulara göre kapsama (0 jeton): eksikler için ek plan yazılır
+        nd = base / "notlar-temiz" if (base / "notlar-temiz").is_dir() else base / "notlar"
+        res = kapsama.run(plan, [nd], labels=["bu çalıştırma"], files=good)
+        (base / "kapsama.md").write_text(kapsama.render(res), encoding="utf-8")
+        print("\n" + "=" * 60)
+        for slug, r in res.items():
+            low = r["kapsanan"] / max(1, r["toplam"]) < kapsama.VARSAYILAN_ESIK
+            print(f"arastir: kapsama {slug}: {r['kapsanan']}/{r['toplam']} olgu" + (f" · eksik: {'; '.join(e['ad'] for e in r['eksik'])[:200]}" if r["eksik"] else ""))
+            if low:
+                code = max(code, 73)
+        ep = kapsama.eksik_plan(res)
+        if ep:
+            (base / "eksik-PLAN.json").write_text(json.dumps(ep, ensure_ascii=False, indent=2), encoding="utf-8")
+            print(f"arastir: eksik olgular için ek plan: {base / 'eksik-PLAN.json'} → `arastir.py eksik-PLAN.json -d BASKA_DIZIN --hafif`, sonra "
+                  f"`uzlas.py <bu>/notlar-temiz BASKA_DIZIN/notlar-temiz --yaz birlesik/` ile birleştir", flush=True)
     if failed or weak:
         code = max(code, 73)   # kısmi başarı: bazı konular eksik ya da zayıf
     return code
