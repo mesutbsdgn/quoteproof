@@ -196,8 +196,10 @@ Quoteproof belli bir sağlayıcıyı ya da bir ajan filosunu varsaymaz. Tek bir 
 | Elinizde olan | Alt ajan arka ucu | Kurulum | Durum |
 |---|---|---|---|
 | **Yalnız Claude Code** | `claude -p` çalıştıran komut satırı arka ucu | `quoteproof.claude-only.example.json` dosyasını kopyalayın, `claude` ile bir kez giriş yapın; API anahtarı gerekmez | **Uçtan uca denendi** (bir konu, iki soru: 19 bulgunun 18'i doğrulandı, not sözleşmeyi ikinci denemede geçti) |
-| **Yalnız GPT/Codex benzeri bir CLI** | o CLI ile komut satırı arka ucu | aynı dosya, `command` değişir; CLI stdin okuyorsa `"format": "text"` ve `"prompt_via": "stdin"` kullanın | Aynı düzenek, **burada denenmedi** |
-| **Bir API hesabı** (Alibaba Cloud, OpenAI uyumlu, Ollama ve diğerleri) | çok sağlayıcı destekleyen OpenCode ya da komut satırı arka ucu | `quoteproof.example.json`: `models.*.opencode` = `SAĞLAYICI/MODEL`, anahtar ortam değişkeninde | OpenCode yolu **bir sağlayıcıyla denendi**, diğerleri denenmedi |
+| **Yalnız Codex CLI** | `codex exec` çalıştıran komut satırı arka ucu | `quoteproof.codex.example.json` dosyasını kopyalayın, `codex login` ile bir kez giriş yapın; `--search`, `exec`'ten *önce* yazılır | **Uçtan uca denendi** (aynı konu: 8 bulgunun 7'si doğrulandı, not sözleşmeyi ikinci denemede geçti, 63 sn) |
+| **Başka bir ajan CLI'si** | o CLI ile komut satırı arka ucu | aynı dosya, `command` değişir; CLI stdin okuyorsa `"format": "text"` ve `"prompt_via": "stdin"` kullanın | Aynı düzenek, **denenmedi** |
+| **Bir API hesabı** (Alibaba Cloud, OpenAI uyumlu ve diğerleri) | çok sağlayıcı destekleyen OpenCode ya da komut satırı arka ucu | `quoteproof.example.json`: `models.*.opencode` = `SAĞLAYICI/MODEL`, anahtar ortam değişkeninde | OpenCode yolu **bir sağlayıcıyla denendi**, diğerleri denenmedi |
+| **Yalnız Ollama** | alt ajan olarak değil: Ollama'nın kendi arama aracı yok | en fazla isteğe bağlı hakem (`ollama run MODEL`, `"prompt_via": "stdin"`) | **Denenmedi**: yerelde model kurulu değildi, bulut modelleri giriş istedi |
 | **Hiç model yok** | yok | başka yerde yazılmış herhangi bir yanıt üzerinde `dogrula.py`, `destek.py`, `rapor_kontrol.py` | Denendi; model yok, anahtar yok, 0 jeton |
 
 Bilmeniz gerekenler:

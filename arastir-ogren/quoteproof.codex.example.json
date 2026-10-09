@@ -1,0 +1,14 @@
+{
+  "_comment": "Yalnız Codex CLI (codex) kullanan biri için: anahtar ve OpenCode gerekmez; codex kendi oturumunu kullanır (önce `codex login`). DİKKAT: --search bayrağı `exec`'in DEĞİL ana komutun bayrağıdır, exec'ten ÖNCE yazılmalıdır. Sandbox salt okunur. CODEX-MODEL-ID yerine hesabınızdaki model adını yazın. Bu kipte (format: text) araç kullanımı doğrulanamaz; stdout yalnız son yanıtı taşır, günlük stderr'e gider.",
+
+  "models": { "fast": { "cli": "CODEX-MODEL-ID" } },
+  "default_model": "fast",
+  "api_key_env": null,
+
+  "cli_backend": {
+    "command": ["codex", "--search", "exec", "-s", "read-only", "--skip-git-repo-check", "--ephemeral", "--color", "never",
+                "-c", "model_reasoning_effort=\"low\"", "-m", "{model}", "-"],
+    "format": "text",
+    "prompt_via": "stdin"
+  }
+}

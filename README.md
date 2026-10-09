@@ -196,8 +196,10 @@ Quoteproof does not assume any particular provider or a fleet of agents. One mod
 | You have | Worker back-end | Setup | Status |
 |---|---|---|---|
 | **Only Claude Code** | command-line back-end running `claude -p` | copy `quoteproof.claude-only.example.json`, log in to `claude` once; no API key | **Tested end to end** (one topic, two questions: 18 of 19 findings verified, the note passed the contract on the second attempt) |
-| **Only a GPT/Codex-style CLI** | command-line back-end with that CLI | same file, replace `command`; use `"format": "text"` and `"prompt_via": "stdin"` if the CLI reads stdin | Same mechanism, **not tested here** |
-| **An API account** (Alibaba Cloud, OpenAI-compatible, Ollama and others) | OpenCode, which supports many providers, or a command-line back-end | `quoteproof.example.json`: `models.*.opencode` = `PROVIDER/MODEL`, key in an environment variable | OpenCode path **tested with one provider**; others not tested |
+| **Only the Codex CLI** | command-line back-end running `codex exec` | copy `quoteproof.codex.example.json`, run `codex login` once; `--search` goes *before* `exec` | **Tested end to end** (same topic: 7 of 8 findings verified, the note passed the contract on the second attempt, 63 s) |
+| **Another agent CLI** | command-line back-end with that CLI | same file, replace `command`; use `"format": "text"` and `"prompt_via": "stdin"` if the CLI reads stdin | Same mechanism, **not tested** |
+| **An API account** (Alibaba Cloud, OpenAI-compatible and others) | OpenCode, which supports many providers, or a command-line back-end | `quoteproof.example.json`: `models.*.opencode` = `PROVIDER/MODEL`, key in an environment variable | OpenCode path **tested with one provider**; others not tested |
+| **Ollama only** | not as a worker: Ollama has no search tool of its own | at most the optional referee (`ollama run MODEL`, `"prompt_via": "stdin"`) | **Not tested**: no local model was installed and the cloud models needed a sign-in |
 | **No model at all** | none | `dogrula.py`, `destek.py`, `rapor_kontrol.py` on any answer written elsewhere | Tested; no model, no key, 0 tokens |
 
 Things to know:
