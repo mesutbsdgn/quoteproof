@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Çevrimdışı birim testleri (ağ ve model kullanmaz): python3 scripts/test_arastir.py"""
+import contextlib
 import datetime
+import io
 import json
 import os
 import sys
@@ -1517,6 +1519,96 @@ class PlanMinUrl(unittest.TestCase):
             results = [{"slug": "dar", "ok": True}, {"slug": "genis", "ok": True}]
             plan = [{"slug": "dar", "min_url": 3}, {"slug": "genis"}]
             self.assertEqual(arastir.weak_notes(base, results, plan), ["genis"])      # dar: 4 ≥ 3 → zayıf değil; genis: 4 < 8 → zayıf
+
+
+import uzlas  # noqa: E402
+
+
+def _not(findings, gaps=()):
+    """Test notu: findings = [(iddia, alıntı, url)]"""
+    s = "# k\n\n## Soru\n### Özet\nx\n### Alıntılı bulgular\n"
+    s += "".join(f'- {c} — "{q}" — [K]({u}) (2026-10, birincil)\n' for c, q, u in findings)
+    s += "### Çıkarımlar\n- yorum\n### Boşluklar\n" + "".join(f"- {g}\n" for g in gaps)
+    return s
+
+
+class Uzlasi(unittest.TestCase):
+    """Birkaç bağımsız çalıştırmanın doğrulanmış notlarını birleştirir: kaç çalıştırma aynı iddiayı buldu (tutarlılık) ve birleşik kapsama."""
+    A = ("Bakım takvimi", "Best-effort maintenance will continue until March 2026 for the project", "https://k.example/blog/retire")
+    A2 = ("Takvim", "best-effort maintenance will continue until March 2026", "https://k.example/blog/retire/")      # aynı iddia, farklı yazım/URL sonu
+    B = ("Sürüm yok", "There will be no further releases and no bugfixes after retirement", "https://k.example/blog/retire")
+    C = ("Arşiv", "The repository was archived by the owner and is now read-only for everyone", "https://g.example/repo")
+    D = ("Alternatif", "None of the available alternatives are direct drop-in replacements for it", "https://k.example/blog/statement")
+
+    def _dirs(self, d, runs):
+        out = []
+        for i, (name, note) in enumerate(runs):
+            p = Path(d) / name / "notlar-temiz"
+            p.mkdir(parents=True)
+            (p / "konu.md").write_text(note, encoding="utf-8")
+            out.append(str(p))
+        return out
+
+    def test_ayni_iddia_kumelenir_tek_koşuda_cikanlar_ayri_kalir(self):
+        with tempfile.TemporaryDirectory() as d:
+            dirs = self._dirs(d, [("r1", _not([self.A, self.B])), ("r2", _not([self.A2, self.C])), ("r3", _not([self.A, self.D]))])
+            res = uzlas.run(dirs)
+        r = res["konu"]
+        self.assertEqual(r["runs"], ["r1", "r2", "r3"])
+        sizes = sorted(len(c) for c in r["clusters"])
+        self.assertEqual(sizes, [1, 1, 1, 3])              # A üç çalıştırmada; B, C, D birer çalıştırmada
+        rep = uzlas.representative(next(c for c in r["clusters"] if len(c) == 3))
+        self.assertIn("best-effort", rep["metin"].lower())
+
+    def test_birlesik_not_k_n_oneki_tasir_ve_yeniden_dogrulanir(self):
+        pages = {"https://k.example/blog/retire": "Notice. Best-effort maintenance will continue until March 2026 for the project. There will be no further releases and no bugfixes after retirement.",
+                 "https://g.example/repo": "The repository was archived by the owner and is now read-only for everyone who visits."}
+        with tempfile.TemporaryDirectory() as d:
+            dirs = self._dirs(d, [("r1", _not([self.A, self.B], ["Chrome sayfası okunamadı"])), ("r2", _not([self.A2, self.C]))])
+            res = uzlas.run(dirs)
+            r = res["konu"]
+            text = uzlas.merge_note("konu", r["runs"], r["clusters"], r["gaps"])
+            self.assertIn("**[2/2 çalıştırma]**", text)
+            self.assertEqual(text.count("**[1/2 çalıştırma]**"), 2)
+            self.assertIn("(r1) Chrome sayfası okunamadı", text)
+            out = Path(d) / "birlesik"; out.mkdir()
+            (out / "konu.md").write_text(text, encoding="utf-8")
+            with mock.patch.object(dogrula.oku, "load", side_effect=lambda u, cache_dir=None: {"ok": u in pages, "markdown": pages.get(u, ""), "hata": ""}):
+                rows, _ = dogrula.run(str(out), limit=0, jobs=1)
+        self.assertEqual({x["karar"] for x in rows}, {"Doğrulandı"})
+        self.assertEqual(len(rows), 3)
+
+    def test_rapor_koşu_başına_katkiyi_ve_tek_kosuyu_gosterir(self):
+        with tempfile.TemporaryDirectory() as d:
+            dirs = self._dirs(d, [("r1", _not([self.A, self.B])), ("r2", _not([self.A2, self.C]))])
+            rep = uzlas.render(uzlas.run(dirs))
+        self.assertIn("Ayrı iddia kümesi: **3**", rep)
+        self.assertIn("2 çalıştırma → 1 iddia", rep)
+        self.assertIn("1 çalıştırma → 2 iddia", rep)
+        self.assertIn("yalnız bu çalıştırmada çıkan: 1", rep)
+        self.assertIn("Yalnız tek çalıştırmada çıkanlar (2)", rep)
+
+    def test_tek_kosu_uyarir_ve_bir_koşuda_eksik_not_sayimi_bozmaz(self):
+        with tempfile.TemporaryDirectory() as d:
+            dirs = self._dirs(d, [("r1", _not([self.A]))])
+            self.assertIn("Tek çalıştırma var", uzlas.render(uzlas.run(dirs)))
+            dirs2 = self._dirs(Path(d) / "x", [("r1", _not([self.A])), ("r2", _not([self.A2]))])
+            (Path(dirs2[1]) / "konu.md").unlink()
+            (Path(dirs2[1]) / "baska.md").write_text(_not([self.A]), encoding="utf-8")
+            res = uzlas.run(dirs2)
+        self.assertEqual(res["konu"]["runs"], ["r1"])
+        self.assertEqual(res["baska"]["runs"], ["r2"])
+
+    def test_cli_hata_kodlari_ve_dosya_yazimi(self):
+        with tempfile.TemporaryDirectory() as d:
+            dirs = self._dirs(d, [("r1", _not([self.A])), ("r2", _not([self.A2]))])
+            out = Path(d) / "u.md"; yaz = Path(d) / "b"
+            with contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(uzlas.main(["/yok/dizin"]), 2)
+                self.assertEqual(uzlas.main([*dirs, "--etiket", "yalniz-bir"]), 2)
+                self.assertEqual(uzlas.main([*dirs, "--cikti", str(out), "--yaz", str(yaz)]), 0)
+            self.assertTrue(out.read_text(encoding="utf-8").startswith("# Uzlaşı raporu"))
+            self.assertIn("[2/2 çalıştırma]", (yaz / "konu.md").read_text(encoding="utf-8"))
 
 
 class HafifKip(unittest.TestCase):

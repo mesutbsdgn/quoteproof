@@ -102,6 +102,7 @@ Each finding line carries **the claim**, **a verbatim quote**, **a URL of its ow
 | `mcp_oku.py` | Exposes the reader to workers as a tiny MCP server | 0 tokens |
 | `guven.py` | 0–100 source credibility heuristic | 0 tokens |
 | `rapor_kontrol.py` | Checks the **final report** against the pages it cites: catches numbers pinned to the wrong subject, quotes that are not verbatim, citations that never appeared in the research notes | 0 tokens |
+| `uzlas.py` | Merges the verified notes of several independent runs of the same topic: which claims were found in how many runs, what only one run found, and a merged note whose findings carry `[k/N çalıştırma]` (k of N runs) | 0 tokens |
 | `rapor_olc.py` | Measures two reports with the same yardstick (words, headings, sources, gaps) | 0 tokens |
 
 ## Features, explained
@@ -262,6 +263,9 @@ The tool began as a Turkish-language workflow. Section names in notes (`Özet`, 
 **Can I check an answer that was written without the skill?**
 Yes, and it costs no model tokens: `python3 scripts/rapor_kontrol.py answer.md`. It reads the pages the answer cites (full `https://…` addresses, markdown links and scheme-less `domain.tld/path` addresses) and flags quoted passages that are not on the page, numbers that are not there, and answers with no readable source at all. To make an answer checkable, add one sentence to the request: "Give a full https:// URL with every fact and, where possible, a verbatim quote of at most 25 words from the page." In a test with a plain prompt plus that sentence, the answers came out checkable in both tasks (6 and 8 quotations, 5 and 8 addresses; the check found 2 and 1 quotations that were not on the page) at about the cost of the plain prompt. A model that ignores the sentence still comes back with "cannot be checked". On a plain answer with no such sentence the check found two quoted passages that were in fact translations put between quotation marks.
 
+**How do I get a more complete and more consistent result?**
+Run the topic more than once and merge. One run found about 80% of the key facts of a topic and varied a lot from run to run (the weakest of five runs found 8 of 12, the best 12 of 12). On two topics, the union of two runs covered about 91–92% and the union of three about 95–96% (the fact lists were written by hand from what the runs found, so these are approximate figures, not a benchmark). With `--hafif` a run costs about as much as a plain prompt, so three runs cost about one full-mode run. Run each into its own folder, then `python3 scripts/uzlas.py RUN1/notlar-temiz RUN2/notlar-temiz RUN3/notlar-temiz --cikti uzlasi.md --yaz merged/`. The merged notes pass `dogrula.py` again (35 of 35 verified in the test) and every finding carries `[k/N çalıştırma]` (k of N runs); a claim found by a single run is listed as "do not trust alone". Mix two different models if you can: runs of the same model repeat each other's mistakes.
+
 **What does it cost?**
 Measured on two narrow topics (two questions each) with a small low-cost model, from the raw event logs. Input read from the provider's cache is listed apart because it is billed far below fresh input.
 
@@ -297,7 +301,7 @@ In the author's runs, a small topic takes about 30 seconds per worker, and the a
 ## Tests
 
 ```bash
-python3 arastir-ogren/scripts/test_arastir.py   # 182 tests: parsing, contract, resume, verification, trust score, config, MCP server
+python3 arastir-ogren/scripts/test_arastir.py   # 187 tests: parsing, contract, resume, verification, trust score, config, MCP server
 python3 arastir-ogren/scripts/test_oku.py       # 54 tests: extraction, BM25, cache, SSRF, redirects, robots.txt, PDF
 ```
 
@@ -338,6 +342,7 @@ There is no tagged release yet; entries are listed newest first, by commit. Meas
 - `--temiz-yaz` removes a finding whose quote is not on the page, but the same claim can live on in the note's summary. `DISLANAN.md` now lists the remaining lines that share a number or date with the removed finding (document numbers such as `PEP 779` and citation dates are ignored), so they can be checked by hand. Found when a removed "archived on 24 March 2026" quote left that sentence in the summary. Tests: 174 + 54.
 - New `--hafif` mode for narrow topics. Measured with raw event logs, the full mode used 3–7 times the tokens of a plain prompt (search results of 12–24 thousand characters each, eight results by default, a 10–15 search budget; the cached-input part is billed far lower than fresh input). `--hafif` scales the search and call budget to the number of questions (searches = questions + 2, calls = 3 × questions + 2), asks for at most four results per search and caps the steps at 12. It ended near the plain prompt (about 1.1× the fresh input, 1.4–2× the output, 42–52 s against 101–151 s) and kept 19 of 22 quotes verbatim on the same topics. `calisma.json` now also records each attempt's token breakdown (`ayrinti`: fresh, cached, output, reasoning). Tests: 178 + 54.
 - `rapor_kontrol.py` now also reads scheme-less addresses (`kubernetes.io/blog/…`) and bare `(https://…)` addresses, so an answer written without the skill can be checked for free. Label selectors such as `app.kubernetes.io/name=…` are not taken for addresses. On a plain answer it found two translations presented as quotations. Tests: 182 + 54.
+- New `uzlas.py` (consensus): merges the verified notes of several independent runs, counts in how many runs each claim was found, lists what only one run found and writes a merged note with `[k/N çalıştırma]` (k of N runs) on every finding that passes `dogrula.py` again. Motivated by the spread between runs of the same topic (one run found about 80% of the key facts, the weakest 8 of 12). Tests: 187 + 54.
 
 ### Report-level source check ([`c88db28`](https://github.com/mesutbsdgn/quoteproof/commit/c88db28), [#4](https://github.com/mesutbsdgn/quoteproof/issues/4))
 

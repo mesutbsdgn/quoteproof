@@ -102,6 +102,7 @@ Her bulgu satırında dört öğe bulunur: **iddia**, **birebir alıntı**, **bu
 | `mcp_oku.py` | Okuyucuyu alt ajanlara küçük bir MCP sunucusu olarak sunar | 0 jeton |
 | `guven.py` | 0–100 arası sezgisel kaynak güvenilirlik puanı | 0 jeton |
 | `rapor_kontrol.py` | **Son raporu**, kaynak gösterdiği sayfalarla karşılaştırır: yanlış özneye bağlanmış sayıları, birebir olmayan alıntıları ve araştırma notlarında hiç geçmeyen kaynakları yakalar | 0 jeton |
+| `uzlas.py` | Aynı konunun birkaç bağımsız çalıştırmasının doğrulanmış notlarını birleştirir: hangi iddia kaç çalıştırmada bulundu, yalnız tek çalıştırmanın bulduğu ne, ve bulguları `[k/N çalıştırma]` taşıyan birleşik not | 0 jeton |
 | `rapor_olc.py` | İki raporu aynı ölçütlerle ölçer (sözcük, başlık, kaynak, boşluk) | 0 jeton |
 
 ## Özellikler
@@ -262,16 +263,19 @@ Araç, Türkçe bir iş akışı olarak başladı. Notlardaki bölüm adları (`
 **Skill'siz yazılmış bir yanıtı denetleyebilir miyim?**
 Evet, hem de model jetonu harcamadan: `python3 scripts/rapor_kontrol.py yanit.md`. Yanıtın atıf yaptığı sayfaları okur (tam `https://…` adresleri, markdown bağlantıları ve şemasız `alan.adı/yol` adresleri); sayfada bulunmayan tırnaklı alıntıları, sayfada geçmeyen sayıları ve okunabilir hiçbir kaynağı olmayan yanıtları işaretler. Yanıtı denetlenebilir yapmak için isteğe tek cümle ekleyin: "Her olgunun yanına tam bir https:// URL'si ekle; mümkünse sayfadan 25 kelimeyi aşmayan, kelimesi kelimesine bir alıntı ver." Düz istem ve bu cümleyle yapılan bir denemede yanıtlar iki görevde de denetlenebilir çıktı (6 ve 8 tırnaklı alıntı, 5 ve 8 adres; denetim sayfada bulunmayan 2 ve 1 alıntı yakaladı), maliyet yaklaşık düz istem kadardı. Cümleyi yok sayan bir model yine "denetlenemedi" sonucu verir. Böyle bir cümle olmadan yazılmış düz bir yanıtta denetim, tırnak içine konmuş iki çeviriyi (gerçekte alıntı değil) yakaladı.
 
+**Daha eksiksiz ve daha tutarlı sonucu nasıl alırım?**
+Konuyu birden çok kez koşturup birleştirin. Tek bir çalıştırma konunun anahtar olgularının yaklaşık %80'ini buldu ve çalıştırmadan çalıştırmaya çok değişti (beş çalıştırmanın en zayıfı 12 olgudan 8'ini, en iyisi 12'sini buldu). İki konuda iki çalıştırmanın birleşimi yaklaşık %91–92'yi, üç çalıştırmanın birleşimi yaklaşık %95–96'yı kapsadı (olgu listelerini çalıştırmaların bulduklarından elle çıkardım; bu yüzden bunlar bir ölçüt değil, yaklaşık değerlerdir). `--hafif` ile bir çalıştırma düz istem kadar maliyetli olduğundan üç çalıştırma, tam kipte bir çalıştırma kadar tutar. Her çalıştırmayı ayrı bir klasöre alın, sonra `python3 scripts/uzlas.py KOSU1/notlar-temiz KOSU2/notlar-temiz KOSU3/notlar-temiz --cikti uzlasi.md --yaz birlesik/` çalıştırın. Birleşik notlar `dogrula.py`'den yeniden geçer (denemede 35'in 35'i doğrulandı) ve her bulgu `[k/N çalıştırma]` taşır; yalnız tek çalıştırmanın bulduğu iddia "tek başına güvenme" diye listelenir. Mümkünse iki farklı model karıştırın: aynı modelin çalıştırmaları birbirinin hatasını tekrarlar.
+
 **Maliyeti nedir?**
 İki dar konuda (her biri iki soru) küçük, düşük maliyetli bir modelle, ham olay kayıtlarından ölçüldü. Sağlayıcının önbelleğinden okunan girdi, taze girdiden çok daha ucuz fiyatlandığı için ayrı gösterilir.
 
-| Koşu | Taze girdi | Önbellekten girdi | Çıktı + akıl yürütme | Adım | Süre |
+| Çalıştırma | Taze girdi | Önbellekten girdi | Çıktı + akıl yürütme | Adım | Süre |
 |---|---:|---:|---:|---:|---:|
 | Düz istem, skill yok (konu 1 / 2) | 16,3 bin / 14,6 bin | 19,5 bin / 6,1 bin | 1,0 bin / 1,7 bin | 3 / 2 | 33 sn / 54 sn |
 | Tam kip (konu 1 / 2) | 31,1 bin / 34,4 bin | 71,7 bin / 108,3 bin | 5,0 bin / 7,2 bin | 5 / 6 | 101 sn / 151 sn |
 | `--hafif` (konu 1 / 2) | 16,6 bin / 14,8 bin | 22,5 bin / 17,4 bin | 2,8 bin / 2,9 bin | 3 / 3 | 52 sn / 42 sn |
 
-Tam kip pahalıdır, çünkü arama sonuçları (tek arama 12–24 bin karakter döndürür, varsayılan olarak sekiz sonuç) bağlamda kalır ve her adımda yeniden gönderilir; ayrıca bütçesi 10–15 aramadır. `--hafif`, bütçeyi soru sayısına göre ölçekler, aramada en çok dört sonuç ister ve adımı 12 ile sınırlar; alıntı sözleşmesi ve doğrulama aynen kalır. Aynı konularda 22 alıntının 19'u sayfada birebir bulundu; kalan üçü gerçek bozulmaydı (ör. sayfada "Yesterday's" yazarken "Tomorrow's"). Dar konularda (bir ila üç soru) `--hafif`, geniş konularda tam kip kullanın. Doğrulamanın kendisi model jetonu harcamaz. Her hücre tek koşu; sayılar koşudan koşuya değişir (aynı tam kip görevi iki koşuda 152 bin ve 103 bin girdi jetonu okudu).
+Tam kip pahalıdır, çünkü arama sonuçları (tek arama 12–24 bin karakter döndürür, varsayılan olarak sekiz sonuç) bağlamda kalır ve her adımda yeniden gönderilir; ayrıca bütçesi 10–15 aramadır. `--hafif`, bütçeyi soru sayısına göre ölçekler, aramada en çok dört sonuç ister ve adımı 12 ile sınırlar; alıntı sözleşmesi ve doğrulama aynen kalır. Aynı konularda 22 alıntının 19'u sayfada birebir bulundu; kalan üçü gerçek bozulmaydı (ör. sayfada "Yesterday's" yazarken "Tomorrow's"). Dar konularda (bir ila üç soru) `--hafif`, geniş konularda tam kip kullanın. Doğrulamanın kendisi model jetonu harcamaz. Her hücre tek çalıştırma; sayılar çalıştırmadan çalıştırmaya değişir (aynı tam kip görevi iki çalıştırmada 152 bin ve 103 bin girdi jetonu okudu).
 
 **Ne kadar sürüyor?**
 Yazarın denemelerinde küçük bir konu, alt ajan başına yaklaşık 30 saniye sürdü. Bütün bir çalıştırmanın denetimi ve doğrulaması, kaynak sayfaların indirilme süresi hariç birkaç saniyelik işlemci zamanı tutar.
@@ -289,7 +293,7 @@ Yazarın denemelerinde küçük bir konu, alt ajan başına yaklaşık 30 saniye
 - Test setleri çevrimdışı birim testleridir; canlı hat uçtan uca elle denendi, CI'da çalışmaz.
 - **Canlı araştırmanın güvenilirliği henüz kanıtlanmış değil.** Yazara üç bağımsız canlı deneme bildirildi; çalıştırma kayıtları bu depoda yok.
   - *İlk deneme (iki görev):* biten iki görev de çıktı sözleşmesini geçemedi ve `hatali/` klasörüne taşındı; komut satırı yedeği işe yarar bir teşhis vermeyen bir çıkış koduyla bitti. Kök neden ayrıştırılamadı.
-  - *İkinci deneme (tek görev, orta efor, yalnız OpenCode):* not sözleşmeyi geçti (`rc=0`, dört benzersiz URL). Dört URL zayıf kaynak eşiğinin altında kaldığı için koşunun tamamı `73` koduyla bitti. İlk doğrulama 10 alıntının 9'unu doğruladı; onuncusu sayfadan yalnız noktalamayla ayrılıyordu (“FIPS 203” ile “(FIPS) 203”). Doğrulayıcı sonradan bunu *Kısmen* sayacak biçimde değiştirildi; canlı görev yeniden çalıştırılmadı.
+  - *İkinci deneme (tek görev, orta efor, yalnız OpenCode):* not sözleşmeyi geçti (`rc=0`, dört benzersiz URL). Dört URL zayıf kaynak eşiğinin altında kaldığı için çalıştırmanın tamamı `73` koduyla bitti. İlk doğrulama 10 alıntının 9'unu doğruladı; onuncusu sayfadan yalnız noktalamayla ayrılıyordu (“FIPS 203” ile “(FIPS) 203”). Doğrulayıcı sonradan bunu *Kısmen* sayacak biçimde değiştirildi; canlı görev yeniden çalıştırılmadı.
   - *Üçüncü deneme (üç konu, düşük efor):* iki konuda OpenCode denemesi başarısız oldu (hız sınırı ya da adım bütçesi). Komut satırı yedeği kabul edilen notları üretti; böylece üçüncü taraf bir komut satırı arka ucu uçtan uca bir kez çalışmış oldu. O günkü doğrulayıcı 54 bulgunun 24'ünü doğruladı, 12'sini bulamadı. Güncel doğrulayıcı aynı notlarda 34'ü doğruladı ve 4'ünü bulunamadı bıraktı; bu 4'ünün ifadesi sayfadan gerçekten farklı. Geri kalanlar okunamayan sayfalardı (robots.txt engeli, sunucu hataları).
   - *Dördüncü deneme (tek görev, orta efor, yalnız OpenCode, `min_url` verilmiş):* 87 sn'de 12 bulguyla bitti. O anki doğrulayıcı 7 doğrulandı, 1 kısmen, 4 bulunamadı dedi. Bu 4'ün ikisi kötü alıntı değil, okuyucu ya da doğrulayıcı zayıflığıydı: Google Security Blog makalesini bir script şablonunda tutuyor ve okuyucu onu açmıyordu; bir Firefox sayfasından neredeyse hiç metin gelmedi. İkisi de sonradan düzeltildi ya da *Erişilemedi* olarak etiketlendi (bkz. sürüm notları). Diğer ikisi sayfayla uyuşmadı (biri, artık RFC olan bir belgenin eski ifadesini aktarıyor).
   Birkaç çalıştırma güvenilirliği kanıtlamaz. Araştırma alt ajanlarını deneysel sayın ve küçük bir konuyla başlayın.
@@ -297,7 +301,7 @@ Yazarın denemelerinde küçük bir konu, alt ajan başına yaklaşık 30 saniye
 ## Testler
 
 ```bash
-python3 arastir-ogren/scripts/test_arastir.py   # 182 test: ayrıştırma, sözleşme, devam, doğrulama, güven puanı, yapılandırma, MCP sunucusu
+python3 arastir-ogren/scripts/test_arastir.py   # 187 test: ayrıştırma, sözleşme, devam, doğrulama, güven puanı, yapılandırma, MCP sunucusu
 python3 arastir-ogren/scripts/test_oku.py       # 54 test: ayıklama, BM25, önbellek, SSRF, yönlendirme, robots.txt, PDF
 ```
 
@@ -322,7 +326,7 @@ Depoda henüz etiketli sürüm yok; kayıtlar en yeniden en eskiye, commit sıra
 ### Yayımlanmamış (belgeler ve lisans)
 
 - **Lisans MIT'ten GNU AGPL-3.0'a geçti.** Önceki commit'ler (`2fa793e` dahil) MIT Lisansı altında erişilebilir kalır.
-- README yeniden yazıldı; Türkçe metin sadeleştirildi. Arama yapan modellere artık *alt ajan* deniyor, çünkü *çalışan* insan personeli akla getiriyordu; "run" için "koşu" yerine "çalıştırma/deneme" kullanıldı; iki başlık yeniden yazıldı.
+- README yeniden yazıldı; Türkçe metin sadeleştirildi. Arama yapan modellere artık *alt ajan* deniyor, çünkü *çalışan* insan personeli akla getiriyordu; "run" için "çalıştırma" yerine "çalıştırma/deneme" kullanıldı; iki başlık yeniden yazıldı.
 - Güvenlik anlatımı daraltıldı: varsayılanı yasak olan araç izinleri ve ortam süzme yalnızca OpenCode alt ajanları için geçerlidir, özel CLI arka ucu kapsam dışıdır. Gizli bilgi maskeleme yalnızca hata metinlerindeki bazı anahtar benzeri değerleri kapsar.
 - Yapılandırma dosyasının arama yolu düzeltildi (`./quoteproof.json` yerine skill klasöründeki `quoteproof.json`).
 - Okuyucunun proxy kullanmadığı, bu yüzden yalnızca proxy ile dışarı çıkılan ortamlarda çalışmadığı Sınırlar bölümüne eklendi.
@@ -334,10 +338,11 @@ Depoda henüz etiketli sürüm yok; kayıtlar en yeniden en eskiye, commit sıra
 - Okuyucu: MathML `<annotation>` (formülün TeX kopyası) atılır; arXiv sayfaları artık `+3.3+3.3` diye okunmaz. Sayfa önbelleği sürümü v5 oldu; eski önbellekler bir kez atılır.
 - Denetim: "eski tarih" bayrağı bulgu başına satır yerine tek özet satırı oldu. Plan alanı `min_url`, zayıf kaynak eşiğini konu başına belirler. `rapor_kontrol.py`, kaynak gösterilen sayfalarda bir belge numarasının (`RFC 9309`, `FIPS 203`, `CVE-…`) geçmemesini artık uyarı saymaz. Araştırma çıktıları (`arastirma/`) git'e girmez. Testler: 165 + 52.
 - Dördüncü canlı denemede bulundu: okuyucu artık Blogger/Google Security Blog makale gövdesini açıyor (gövde `<script type="text/template">` içinde duruyor; yalnız bu dar kalıp açılır). Büyük bir HTML dosyasından çok az metin çıkarsa (20 KB'tan büyük HTML'den 800 karakterden az; çoğunlukla JavaScript ile yüklenen içerik), bulunamayan alıntı *Bulunamadı* yerine nedeniyle birlikte *Erişilemedi* olarak bildirilir. Sayfa metninde kalan satır içi HTML (`<u>…</u>` gibi) eşleştirmede yok sayılır. Sayfa önbelleği sürümü v6 oldu. Testler: 169 + 54.
-- `rapor_kontrol.py`, raporda `http(s)://` ile başlayan hiç kaynak URL'si yoksa artık uyarır (`kubernetes.io/blog/…` gibi şemasız adresler okunmaz). Önceden böyle bir rapor hiçbir şey denetlenmediği hâlde "0 hata · 0 uyarı" diye çıkıyordu. Skill'li ve skill'siz koşuları karşılaştırırken bulundu. Testler: 171 + 54.
+- `rapor_kontrol.py`, raporda `http(s)://` ile başlayan hiç kaynak URL'si yoksa artık uyarır (`kubernetes.io/blog/…` gibi şemasız adresler okunmaz). Önceden böyle bir rapor hiçbir şey denetlenmediği hâlde "0 hata · 0 uyarı" diye çıkıyordu. Skill'li ve skill'siz çalıştırmaları karşılaştırırken bulundu. Testler: 171 + 54.
 - `--temiz-yaz`, alıntısı sayfada bulunamayan bulguyu çıkarır; ama aynı iddia notun özetinde yaşamaya devam edebilir. `DISLANAN.md` artık, çıkarılan bulguyla aynı sayıyı ya da tarihi taşıyan kalan satırları elle bakılmak üzere listeler (`PEP 779` gibi belge numaraları ve künye tarihleri yok sayılır). Çıkarılan "24 Mart 2026'da arşivlendi" alıntısı bu cümleyi özette bıraktığında bulundu. Testler: 174 + 54.
 - Dar konular için yeni `--hafif` kipi. Ham olay kayıtlarıyla ölçüldü: tam kip, düz isteme göre 3–7 kat jeton harcıyordu (arama başına 12–24 bin karakter sonuç, varsayılan sekiz sonuç, 10–15 aramalık bütçe; önbellekten okunan girdi taze girdiden çok daha ucuz fiyatlanır). `--hafif`, arama ve çağrı bütçesini soru sayısına ölçekler (arama = soru + 2, çağrı = 3 × soru + 2), aramada en çok dört sonuç ister ve adımı 12 ile sınırlar. Düz isteme yakın bitti (taze girdi yaklaşık 1,1 kat, çıktı 1,4–2 kat, süre 101–151 sn yerine 42–52 sn) ve aynı konularda 22 alıntının 19'unu birebir korudu. `calisma.json` artık her denemenin jeton dökümünü de kaydeder (`ayrinti`: taze, önbellek, çıktı, akıl yürütme). Testler: 178 + 54.
 - `rapor_kontrol.py` artık şemasız adresleri (`kubernetes.io/blog/…`) ve çıplak `(https://…)` adreslerini de okur; böylece skill'siz yazılmış bir yanıt bedavaya denetlenebilir. `app.kubernetes.io/name=…` gibi etiket seçiciler adres sayılmaz. Düz bir yanıtta tırnak içinde sunulmuş iki çeviriyi yakaladı. Testler: 182 + 54.
+- Yeni `uzlas.py` (uzlaşı): birkaç bağımsız çalıştırmanın doğrulanmış notlarını birleştirir, her iddianın kaç çalıştırmada bulunduğunu sayar, yalnız tek çalıştırmanın bulduklarını listeler ve her bulgusu `[k/N çalıştırma]` taşıyan, `dogrula.py`'den yeniden geçen birleşik not yazar. Aynı konunun çalıştırmaları arasındaki farktan doğdu (bir çalıştırma anahtar olguların yaklaşık %80'ini, en zayıfı 12'de 8'ini buldu). Testler: 187 + 54.
 
 ### Rapor düzeyinde kaynak kontrolü ([`c88db28`](https://github.com/mesutbsdgn/quoteproof/commit/c88db28), [#4](https://github.com/mesutbsdgn/quoteproof/issues/4))
 
