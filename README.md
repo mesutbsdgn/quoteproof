@@ -283,7 +283,7 @@ In the author's runs, a small topic takes about 30 seconds per worker, and the a
 ## Tests
 
 ```bash
-python3 arastir-ogren/scripts/test_arastir.py   # 169 tests: parsing, contract, resume, verification, trust score, config, MCP server
+python3 arastir-ogren/scripts/test_arastir.py   # 171 tests: parsing, contract, resume, verification, trust score, config, MCP server
 python3 arastir-ogren/scripts/test_oku.py       # 54 tests: extraction, BM25, cache, SSRF, redirects, robots.txt, PDF
 ```
 
@@ -320,6 +320,7 @@ There is no tagged release yet; entries are listed newest first, by commit. Meas
 - Reader: MathML `<annotation>` (the TeX copy of a formula) is dropped, so arXiv pages no longer read `+3.3+3.3`. The page cache version is now v5; old caches are discarded once.
 - Audit: the "stale date" flag is one summary line instead of one line per finding. Plan field `min_url` sets the weak-source threshold per topic. `rapor_kontrol.py` no longer warns that a document identifier (`RFC 9309`, `FIPS 203`, `CVE-…`) is missing from the cited pages. Research outputs (`arastirma/`) are git-ignored. Tests: 165 + 52.
 - Found in the fourth live trial: the reader now opens the Blogger/Google Security Blog article body (it sits in a `<script type="text/template">`; only that narrow pattern is opened). When a page yields almost no text from a large HTML file (under 800 characters from over 20 KB, typically JavaScript-loaded content), a quote that is not found is reported as *Unreachable* with the reason, not as *Not found*. Inline HTML such as `<u>…</u>` left in page text is ignored when matching. Page cache version is now v6. Tests: 169 + 54.
+- `rapor_kontrol.py` now warns when a report contains no `http(s)://` source URL at all (scheme-less addresses such as `kubernetes.io/blog/…` are not read). Before, such a report came out as "0 errors · 0 warnings" although nothing had been checked. Found while comparing runs made with and without the skill. Tests: 171 + 54.
 
 ### Report-level source check ([`c88db28`](https://github.com/mesutbsdgn/quoteproof/commit/c88db28), [#4](https://github.com/mesutbsdgn/quoteproof/issues/4))
 

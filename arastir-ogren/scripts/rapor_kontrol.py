@@ -242,6 +242,9 @@ def run(report_text, cache_dir=None, notes_urls=None, hints=None, jobs=4, loader
         for u in all_urls:
             if normalize_url(u) not in known:
                 extra.append(_finding("uyarı", "notlarda-yok", f"raporun atıf yaptığı URL araştırma notlarında hiç geçmiyor (uydurma/sonradan eklenmiş olabilir): {u}"))
+    if not all_urls:   # hiç okunacak sayfa yok: "0 hata" bir şey söylemez (şemasız adresler "kubernetes.io/blog/…" okunmaz)
+        extra.append(_finding("uyarı", "denetlenemedi", "raporda http(s):// ile başlayan hiçbir kaynak URL'si yok: hiçbir sayfa okunmadı ve hiçbir iddia "
+                              "kaynakla karşılaştırılmadı. Temiz çıktı bu rapor için bir şey söylemez (şemasız adresler okunmaz)."))
     for u in all_urls:
         score = guven.score(u, hints)
         if score["puan"] < 50:

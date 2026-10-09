@@ -1519,6 +1519,20 @@ class PlanMinUrl(unittest.TestCase):
             self.assertEqual(arastir.weak_notes(base, results, plan), ["genis"])      # dar: 4 ≥ 3 → zayıf değil; genis: 4 < 8 → zayıf
 
 
+class DenetlenemediUyarisi(unittest.TestCase):
+    """Şemasız adresli rapor ("kubernetes.io/blog/…") 0 sayfa okutuyordu ve "0 hata" diye temiz görünüyordu (9 Ekim 2026, canlı karşılaştırma)."""
+    def test_kaynak_urlsi_olmayan_rapor_uyari_alir(self):
+        res = rapor_kontrol.run("Duyuru kubernetes.io/blog/2025/11/11/x adresinde: bakım Mart 2026'da bitiyor.", loader=lambda u: {"ok": False, "markdown": "", "hata": "x"})
+        self.assertEqual(res["url_sayisi"], 0)
+        self.assertTrue(any(f["tur"] == "denetlenemedi" and f["seviye"] == "uyarı" for f in res["ekstra"]))
+        self.assertIn("Temiz çıktı bu rapor için bir şey söylemez", rapor_kontrol.render(res, "r.md"))
+
+    def test_urlli_raporda_uyari_yok(self):
+        page = {"ok": True, "markdown": "Maintenance will continue until March 2026 for the project in this repository page text.", "hata": ""}
+        res = rapor_kontrol.run('- Bakım — "Maintenance will continue until March 2026" — [K](https://k.example/x)', loader=lambda u: page)
+        self.assertFalse(any(f["tur"] == "denetlenemedi" for f in res["ekstra"]))
+
+
 class TanimlayiciNumara(unittest.TestCase):
     def test_belge_numaralari_veri_sayilmaz(self):
         f = rapor_kontrol.is_identifier_number
