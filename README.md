@@ -3,8 +3,8 @@
 </p>
 
 <p align="center">
-  <b>An evidence-first research pipeline that catches the quotes AI agents invent.</b><br>
-  Cheap parallel workers do the searching. A finding is trusted only once plain Python has found its quote, word for word, on the page it cites.
+  <b>Quoteproof is an evidence-first research pipeline that checks whether AI research agents’ quotes actually appear in the sources they cite.</b><br>
+  Low-cost models research topics in parallel and record each finding with a verbatim quote in the source’s original language and the page’s URL. A Python verifier then checks whether the quote, numbers, and version details appear on that page—without calling another LLM or spending model tokens. A match shows that the quoted text is on the page; by itself, it does not prove the source is accurate or that the quote supports the claim.
 </p>
 
 <p align="center">

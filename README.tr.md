@@ -3,8 +3,8 @@
 </p>
 
 <p align="center">
-  <b>Yapay zekâ ajanlarının uydurduğu alıntıları yakalayan, kanıt öncelikli araştırma hattı.</b><br>
-  Aramayı ucuz modeller paralel yürütür. Bir bulguya ancak alıntısı, gösterdiği sayfada kelimesi kelimesine bulunursa güvenilir; bu kontrolü model değil, düz bir Python betiği yapar.
+  <b>Quoteproof, yapay zekâ araştırma ajanlarının kullandığı alıntıların kaynak sayfalarında gerçekten yer alıp almadığını denetleyen, kanıt öncelikli bir araştırma hattıdır.</b><br>
+  Düşük maliyetli modeller araştırma konularını paralel inceler ve her bulguyu kaynağın özgün dilindeki birebir alıntı ile sayfanın adresini birlikte kaydeder. Python doğrulayıcısı, alıntının yanı sıra bulgudaki sayı ve sürüm bilgilerinin o sayfada gerçekten bulunup bulunmadığını kontrol eder; bu denetimde başka bir LLM kullanılmaz ve model jetonu harcanmaz. Eşleşme, alıntının sayfada yer aldığını gösterir; kaynağın doğruluğunu ya da alıntının iddiayı desteklediğini tek başına kanıtlamaz.
 </p>
 
 <p align="center">
