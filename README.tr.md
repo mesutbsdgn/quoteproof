@@ -376,9 +376,9 @@ docs/fact-check/          bu README'nin doğrulaması (aşağıya bakın)
 
 ## Sürüm notları
 
-Depoda henüz etiketli sürüm yok; kayıtlar en yeniden en eskiye, commit sırasıyla verilir. Ölçümlerin ayrıntısı kapatılmış [issue'lardadır](https://github.com/mesutbsdgn/quoteproof/issues?q=is%3Aissue+is%3Aclosed).
+v1.0–v1.5 etiketli sürümler [GitHub Releases](https://github.com/mesutbsdgn/quoteproof/releases) sayfasındadır. Ayrıntılı geliştirme geçmişi aşağıda yer alır. Ölçümlerin ayrıntısı kapatılmış [issue'lardadır](https://github.com/mesutbsdgn/quoteproof/issues?q=is%3Aissue+is%3Aclosed).
 
-### Yayımlanmamış (belgeler ve lisans)
+### Ayrıntılı geliştirme geçmişi
 
 - **Lisans MIT'ten GNU AGPL-3.0'a geçti.** Önceki commit'ler (`2fa793e` dahil) MIT Lisansı altında erişilebilir kalır.
 - README yeniden yazıldı; Türkçe metin sadeleştirildi. Arama yapan modellere artık *alt ajan* deniyor, çünkü *çalışan* insan personeli akla getiriyordu; "run" için "çalıştırma" yerine "çalıştırma/deneme" kullanıldı; iki başlık yeniden yazıldı.

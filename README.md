@@ -370,9 +370,9 @@ docs/fact-check/          the fact-check of this README (see below)
 
 ## Release notes
 
-There is no tagged release yet; entries are listed newest first, by commit. Measurements are detailed in the [closed issues](https://github.com/mesutbsdgn/quoteproof/issues?q=is%3Aissue+is%3Aclosed).
+Tagged releases v1.0–v1.5 are listed in [GitHub Releases](https://github.com/mesutbsdgn/quoteproof/releases). The detailed development history follows below. Measurements are documented in the [closed issues](https://github.com/mesutbsdgn/quoteproof/issues?q=is%3Aissue+is%3Aclosed).
 
-### Unreleased (documentation and license)
+### Detailed development history
 
 - **License changed from MIT to GNU AGPL-3.0.** Earlier commits (up to `2fa793e`) stay available under the MIT License.
 - README rewritten; the Turkish text was simplified. In Turkish the search models are now called *alt ajan* (sub-agent) because *çalışan* means a human employee; "run" is now *çalıştırma/deneme*, not *koşu*; two headings were reworded.
