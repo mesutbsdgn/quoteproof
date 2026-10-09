@@ -34,7 +34,7 @@ import dogrula  # noqa: E402
 import oku  # noqa: E402
 
 SECTIONS_CHECKED = ("Özet", "Çıkarımlar")
-SEV = {"hiçbir-yerde": "uyarı", "başka-sayfada": "uyarı", "sayfada": "bilgi"}
+SEV = {"hiçbir-yerde": "uyarı", "başka-sayfada": "uyarı", "sayfada": "bilgi", "okunamayan-sayfa-var": "bilgi"}
 SEV_ORDER = {"uyarı": 0, "bilgi": 1}
 MAX_PAGES_PER_NOTE = 40
 
@@ -52,7 +52,7 @@ DOC_ID_RE = re.compile(r"(?<![\w-])(?:RFC|FIPS|PEP|JEP|KEP|CVE|CWE|CAPEC|BCP|ISO
 ACRONYM_RE = re.compile(r"(?<![\w-])[A-Z][A-Z0-9]{2,}(?:-[A-Z0-9]+)*(?![\w-])")
 COMMON_ACRONYMS = {"ABD", "AB", "TL", "USD", "EUR", "API", "URL", "HTTP", "HTTPS", "JSON", "HTML", "CSS", "PDF", "SSL", "AND", "THE", "TBD", "OK", "ILE", "ICIN"}
 HEDGE_RE = re.compile(r"(?i)\(çıkarım[^)]*\)|çıkarım:")
-NUM_CORE = re.compile(r"%\s?\d+(?:[.,]\d+)?(?:\s?[-–]\s?\d+(?:[.,]\d+)?)?|\d+(?:[.,]\d+)?\s?[-–]\s?\d+(?:[.,]\d+)?\s?%?|\d+(?:[.,]\d+)+|\d{1,3}(?:[.,]\d{3})+|\d{3,}|\d+\s?(?:x|×|%|kat|ms|sn|saniye|MB|GB|KB|TL|USD|EUR)(?![\w])")
+NUM_CORE = re.compile(r"(?i:\d+(?:[.,]\d+)?\s?(?:KB|MB|GB)(?![\w]))|%\s?\d+(?:[.,]\d+)?(?:\s?[-–]\s?\d+(?:[.,]\d+)?)?|\d+(?:[.,]\d+)?\s?[-–]\s?\d+(?:[.,]\d+)?\s?%?|\d+(?:[.,]\d+)+|\d{1,3}(?:[.,]\d{3})+|\d{3,}|\d+\s?(?:x|×|%|kat|ms|sn|saniye|MB|GB|KB|TL|USD|EUR)(?![\w])")
 GENERIC = {"2024", "2025", "2026", "2027", "2028"}
 HTTP_STATUS = {"400", "401", "403", "404", "410", "429", "500", "502", "503", "504"}   # çalışanın "sayfa 404 verdi" demesi kaynağın değil getirmenin durumudur
 
@@ -168,6 +168,18 @@ def range_variants(tok):
     return [f"{a}-{b}%", f"{a}-{b} %", f"{a}-{b}", f"{a} to {b}", f"{a}% to {b}%", f"{a}% - {b}%", f"{a}-{b} percent"]
 
 
+def derived_size(text_norm, value, unit):
+    v = float(value.replace(",", "."))
+    places = len(value.replace(",", ".").split(".")[1]) if re.search(r"[.,]\d", value) else 0
+    tol = 0.5 * 10 ** -places
+    power = {"kb": 1, "mb": 2, "gb": 3}[unit]
+    for m in re.finditer(r"(?<![\w.])\d{1,3}(?:,\d{3})+(?![\w])|(?<![\w.,])\d{3,}(?![\w.,])", text_norm):
+        n = float(m.group(0).replace(",", ""))
+        if any(abs(n / base ** power - v) <= tol for base in (1000, 1024)):
+            return True
+    return False
+
+
 def present(item, text_norm):
     if not text_norm:
         return False
@@ -187,6 +199,9 @@ def present(item, text_norm):
     tok = key
     if dogrula.number_positions(text_norm, tok):
         return True
+    size = re.fullmatch(r"(\d+(?:[.,]\d+)?)(kb|mb|gb)", tok)
+    if size:   # "~2.2 KB": sayfa bayt yazar ("2,249"); birim çevirisi (1000 ya da 1024 tabanı) kanıt sayılır
+        return derived_size(text_norm, size.group(1), size.group(2))
     if any(v in text_norm for v in range_variants(tok)):
         return True
     m = re.fullmatch(r"(%?)(\d+(?:[.,]\d+)?)-(\d+(?:[.,]\d+)?)(%?)", tok)
@@ -238,8 +253,8 @@ def check_question(q, title, skip, all_note_pages):
                 elif present(it, other_text):
                     kind = "başka-sayfada"
                 else:
-                    kind = "hiçbir-yerde"
-                if it["tur"] == "kisaltma" and kind != "hiçbir-yerde":
+                    kind = "okunamayan-sayfa-var" if unreadable else "hiçbir-yerde"   # okunamayan sayfa varken "hiçbir yerde" denemez: sayı orada olabilir
+                if it["tur"] == "kisaltma" and kind not in ("hiçbir-yerde", "okunamayan-sayfa-var"):
                     continue      # kısaltma zayıf sinyal: yalnız hiçbir sayfada yoksa söylenir
                 findings.append({"seviye": SEV[kind], "tur": kind, "oge": it["etiket"], "oge_turu": it["tur"]})
             if findings:

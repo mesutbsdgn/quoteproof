@@ -2027,6 +2027,23 @@ class DestekKontrol(unittest.TestCase):
             note.write_text(note.read_text(encoding="utf-8").replace(self.URL1, "https://example.org/howto/guide"), encoding="utf-8")
             self.assertEqual(self._flags(self._run(d, {"https://example.org/howto/guide": self.FILL})), [])   # adres "howto" diyor
 
+    def test_bayttan_kb_cevirisi_kanittir(self):
+        with tempfile.TemporaryDirectory() as d:
+            self._note(d, "Açık anahtar yaklaşık 2.2 KB.", q1_quote="hqc-128 public key 2,249 bytes")
+            self.assertEqual(self._flags(self._run(d)), [])
+        with tempfile.TemporaryDirectory() as d:
+            self._note(d, "Açık anahtar yaklaşık 3.9 KB.", q1_quote="hqc-128 public key 2,249 bytes")
+            self.assertEqual(len(self._flags(self._run(d))), 1)
+
+    def test_okunamayan_sayfa_varken_hicbir_yerde_denmez(self):
+        with tempfile.TemporaryDirectory() as d:
+            self._note(d, "Ek yük %37 ölçüldü.", q2="x")
+            note = Path(d, "konu.md")
+            note.write_text(note.read_text(encoding="utf-8").replace("[A]", "[A2](https://example.org/zzz) [A]"), encoding="utf-8")
+            res = self._run(d, {self.URL1: self.FILL, self.URL2: self.FILL})
+            self.assertEqual(self._flags(res), [("okunamayan-sayfa-var", "%37")])
+            self.assertEqual(destek.strong_count(res), 0)
+
     def test_okunamayan_sayfada_yok_denmez(self):
         with tempfile.TemporaryDirectory() as d:
             self._note(d, "Ek yük %37 ölçüldü.")
