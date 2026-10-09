@@ -259,6 +259,17 @@ The checking tools need none. The research workers need an agent runtime and an 
 **Why are some names Turkish?**
 The tool began as a Turkish-language workflow. Section names in notes (`Özet`, `Alıntılı bulgular`, …) and command-line flags are Turkish and are part of the format the parsers read; the *content* can be in any language, and quotes always stay in the source's language.
 
+**What does it cost?**
+Measured on two narrow topics (two questions each) with a small low-cost model, from the raw event logs. Input read from the provider's cache is listed apart because it is billed far below fresh input.
+
+| Run | Fresh input | Cached input | Output + reasoning | Steps | Time |
+|---|---:|---:|---:|---:|---:|
+| Plain prompt, no skill (topic 1 / 2) | 16.3k / 14.6k | 19.5k / 6.1k | 1.0k / 1.7k | 3 / 2 | 33 s / 54 s |
+| Full mode (topic 1 / 2) | 31.1k / 34.4k | 71.7k / 108.3k | 5.0k / 7.2k | 5 / 6 | 101 s / 151 s |
+| `--hafif` (topic 1 / 2) | 16.6k / 14.8k | 22.5k / 17.4k | 2.8k / 2.9k | 3 / 3 | 52 s / 42 s |
+
+The full mode costs more because search results (one search returns 12–24 thousand characters, eight results by default) stay in the context and are re-sent at every step, and because its budget is 10–15 searches. `--hafif` scales the budget to the number of questions, asks for at most four results per search and caps the steps at 12; the quote contract and the verification stay as they are. On the same topics 19 of its 22 quotes were found verbatim; the other three were real distortions (for example "Tomorrow's" where the page says "Yesterday's"). Use `--hafif` for narrow topics (one to three questions) and the full mode for broad ones. The verification itself spends no model tokens. One run per cell: the numbers vary from run to run (the same full-mode task read 152k and 103k input tokens in two runs).
+
 **How slow is it?**
 In the author's runs, a small topic takes about 30 seconds per worker, and the audit + verification of a whole run takes a few seconds of CPU plus the time to fetch the cited pages.
 
@@ -283,7 +294,7 @@ In the author's runs, a small topic takes about 30 seconds per worker, and the a
 ## Tests
 
 ```bash
-python3 arastir-ogren/scripts/test_arastir.py   # 174 tests: parsing, contract, resume, verification, trust score, config, MCP server
+python3 arastir-ogren/scripts/test_arastir.py   # 178 tests: parsing, contract, resume, verification, trust score, config, MCP server
 python3 arastir-ogren/scripts/test_oku.py       # 54 tests: extraction, BM25, cache, SSRF, redirects, robots.txt, PDF
 ```
 
@@ -322,6 +333,7 @@ There is no tagged release yet; entries are listed newest first, by commit. Meas
 - Found in the fourth live trial: the reader now opens the Blogger/Google Security Blog article body (it sits in a `<script type="text/template">`; only that narrow pattern is opened). When a page yields almost no text from a large HTML file (under 800 characters from over 20 KB, typically JavaScript-loaded content), a quote that is not found is reported as *Unreachable* with the reason, not as *Not found*. Inline HTML such as `<u>…</u>` left in page text is ignored when matching. Page cache version is now v6. Tests: 169 + 54.
 - `rapor_kontrol.py` now warns when a report contains no `http(s)://` source URL at all (scheme-less addresses such as `kubernetes.io/blog/…` are not read). Before, such a report came out as "0 errors · 0 warnings" although nothing had been checked. Found while comparing runs made with and without the skill. Tests: 171 + 54.
 - `--temiz-yaz` removes a finding whose quote is not on the page, but the same claim can live on in the note's summary. `DISLANAN.md` now lists the remaining lines that share a number or date with the removed finding (document numbers such as `PEP 779` and citation dates are ignored), so they can be checked by hand. Found when a removed "archived on 24 March 2026" quote left that sentence in the summary. Tests: 174 + 54.
+- New `--hafif` mode for narrow topics. Measured with raw event logs, the full mode used 3–7 times the tokens of a plain prompt (search results of 12–24 thousand characters each, eight results by default, a 10–15 search budget; the cached-input part is billed far lower than fresh input). `--hafif` scales the search and call budget to the number of questions (searches = questions + 2, calls = 3 × questions + 2), asks for at most four results per search and caps the steps at 12. It ended near the plain prompt (about 1.1× the fresh input, 1.4–2× the output, 42–52 s against 101–151 s) and kept 19 of 22 quotes verbatim on the same topics. `calisma.json` now also records each attempt's token breakdown (`ayrinti`: fresh, cached, output, reasoning). Tests: 178 + 54.
 
 ### Report-level source check ([`c88db28`](https://github.com/mesutbsdgn/quoteproof/commit/c88db28), [#4](https://github.com/mesutbsdgn/quoteproof/issues/4))
 

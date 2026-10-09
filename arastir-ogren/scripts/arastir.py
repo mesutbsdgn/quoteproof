@@ -70,6 +70,7 @@ WEAK_URLS = 8       # bunun altı kabul edilir ama "zayıf" işaretlenir (çık�
 SECRET_RE = re.compile(r"(?i)(api[_-]?key|token|secret|authorization|bearer)([\"'\s:=]+)[A-Za-z0-9._\-]{8,}")
 # Araç çağrısı döngüsünü sınırlar: sınıra gelince OpenCode araçsız nihai cevap yazmaya zorlar (aksi halde sonsuza dek arayabilir).
 STEPS_BY_EFFORT = {"dusuk": 16, "orta": 24, "yuksek": 32}
+HAFIF_ADIM = 12     # --hafif kipinde adım tavanı (araç çağrısı döngüsü; her adım bağlamı yeniden gönderir)
 # Alt süreçlere (OpenCode ve onun MCP sunucuları) yalnız bu değişkenler geçer; kalan ortam (başka servis anahtarları vb.) sızmaz.
 ENV_ALLOWLIST = ("PATH", "HOME", "USER", "LOGNAME", "SHELL", "TERM", "LANG", "LC_ALL", "LC_CTYPE", "TMPDIR", "TZ", "XDG_CONFIG_HOME",
                  "XDG_DATA_HOME", "XDG_CACHE_HOME", "SSL_CERT_FILE", "SSL_CERT_DIR", "HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY", "https_proxy", "http_proxy", "no_proxy")
@@ -137,7 +138,19 @@ OKUMA_MCP = ("- Sayfa okurken `oku` araçlarını kullan (`webfetch` kapalı): `
 OKUMA_GENEL = "- Arama özetlerine (snippet) güvenme; umut verici sayfaların içeriğine bak ve alıntıyı sayfadan al."
 
 
-def render(item, template, okuma=OKUMA_GENEL):
+HAFIF_ARAMA = ("- Web aramasını kullan. Sorguları kısa (5 kelimeden az) yaz ve her seferinde farklı biçimde ifade et; aynı sorguyu tekrarlama. "
+               "Toplam yaklaşık 10–15 arama yap, fazlasını yapma.")
+HAFIF_BUTCE = ("- **Bütçen:** yaklaşık 15 araç çağrısı. Bütçe bitince ya da yeni bilgi gelmemeye başlayınca ARAMAYI BIRAK ve elindekiyle çıktıyı yaz; "
+               "boş elle dönme, eksikleri **Boşluklar**'a yaz.")
+
+
+def hafif_butce(n_soru):
+    """Hafif kip bütçesi konunun büyüklüğüne ölçeklenir: soru başına 3 araç çağrısı + 2; arama sayısı soru + 2. (Tam kip: 10–15 arama, ~15 çağrı.)"""
+    n = max(1, n_soru)
+    return n + 2, 3 * n + 2
+
+
+def render(item, template, okuma=OKUMA_GENEL, hafif=False):
     sorular = item.get("sorular") or []
     numbered = "\n".join(f"{i}. {s.strip()}" for i, s in enumerate(sorular, 1)) or "1. (belirtilmedi — konuyu kapsamlı ele al)"
     values = {
@@ -150,6 +163,13 @@ def render(item, template, okuma=OKUMA_GENEL):
         "okuma": okuma,
     }
     out = template
+    if hafif:   # jeton maliyeti: arama sonuçları bağlama girer ve her adımda yeniden gönderilir → az ve dar arama, ölçekli bütçe
+        n_ara, n_cagri = hafif_butce(len(sorular))
+        out = out.replace(HAFIF_ARAMA, f"- Web aramasını kullan. Sorguları kısa (5 kelimeden az) yaz; aynı sorguyu tekrarlama. **Toplam en çok {n_ara} arama; "
+                                       "her aramada en çok 4 sonuç iste (`numResults: 4`)** ve mümkünse aynı mesajda 2 farklı sorguyu birlikte gönder.")
+        out = out.replace(HAFIF_BUTCE, f"- **Bütçen:** en çok {n_cagri} araç çağrısı (arama + sayfa okuma). Birincil kaynağın URL'sini bulunca aramayı BIRAK; "
+                                       "alıntıyı doğrudan o sayfadan al. Bütçe bitince ya da yeni bilgi gelmemeye başlayınca elindekiyle çıktıyı yaz; "
+                                       "eksikleri **Boşluklar**'a yaz.")
     for key, value in values.items():
         out = out.replace("{{" + key + "}}", value)
     return out
@@ -200,6 +220,7 @@ def parse_opencode_events(stdout):
     Nihai cevap = `step_finish.reason == "stop"` ile biten adımın metni (gerçek akışta ölçüldü: ara adımlar "tool-calls" ile biter).
     Araç çağrısıyla biten (ör. adım sınırına/zaman aşımına takılan) bir akışta ara düşünce metni "cevap" sayılmaz; `tamam` False döner."""
     steps, reasons, step, tools, errors, tokens = {}, {}, 0, {}, [], [0, 0]
+    detail = {"taze": 0, "onbellek": 0, "cikti": 0, "akil": 0}   # maliyet dökümü: önbellekten okunan girdi taze girdiden çok ucuzdur, toplama gömülmesin
     for line in stdout.splitlines():
         line = line.strip()
         if not line.startswith("{"):
@@ -225,6 +246,10 @@ def parse_opencode_events(stdout):
             cache = t.get("cache") if isinstance(t.get("cache"), dict) else {}
             tokens[0] += (t.get("input") or 0) + (cache.get("read") or 0)
             tokens[1] += (t.get("output") or 0) + (t.get("reasoning") or 0)
+            detail["taze"] += t.get("input") or 0
+            detail["onbellek"] += cache.get("read") or 0
+            detail["cikti"] += t.get("output") or 0
+            detail["akil"] += t.get("reasoning") or 0
         elif kind == "error" or isinstance(ev.get("error"), dict):
             errors.append(redact(json.dumps(ev.get("error", ev), ensure_ascii=False))[:200])
     stop_steps = [n for n, r in reasons.items() if r == "stop" and n in steps]
@@ -233,7 +258,7 @@ def parse_opencode_events(stdout):
     else:           # "stop" ile biten adım yok → kesilmiş ya da tanınmayan akış: ara düşünce metni nihai cevap SAYILMAZ (kapalı-varsayılan)
         final, done = "", False
     return {"metin": final, "araclar": tools, "hatalar": errors, "jeton": tokens, "tamam": done,
-            "son_neden": reasons[max(reasons)] if reasons else None}
+            "son_neden": reasons[max(reasons)] if reasons else None, "ayrinti": detail}
 
 
 def redact(text):
@@ -323,12 +348,13 @@ def opencode_argv(model, prompt_text, workdir, effort):
 
 
 # ----------------------------------------------------------------------------- arka uç çalıştırıcıları
-def opencode_config(effort, reader_cache=None, search=True):
+def opencode_config(effort, reader_cache=None, search=True, hafif=False):
     """Çalışan yapılandırması: en az yetki. `tools` kapalı-varsayılandır (`"*": false`): kullanıcının genel OpenCode MCP'leri
     (kullanıcının kendi eklediği her MCP sunucusu), `read/grep/glob/task/skill` gibi yerleşikler dahil yalnız burada açıkça verilenler çalışır.
     Gerçek OpenCode ile ölçüldü: bu ayarla model yalnız `oku_sayfa_oku, oku_sayfada_ara, websearch` araçlarını görür."""
     cfg = json.loads(json.dumps(OPENCODE_PERMISSIONS))
-    cfg["agent"] = {"plan": {"steps": STEPS_BY_EFFORT.get(effort, 16)}}
+    steps = STEPS_BY_EFFORT.get(effort, 16)
+    cfg["agent"] = {"plan": {"steps": min(steps, HAFIF_ADIM) if hafif else steps}}
     tools = {"*": False}
     if search:
         tools["websearch"] = True
@@ -344,13 +370,13 @@ def opencode_config(effort, reader_cache=None, search=True):
     return cfg
 
 
-def work_opencode(prompt_text, note, base, model_key, effort, timeout, search, reader=True):
+def work_opencode(prompt_text, note, base, model_key, effort, timeout, search, reader=True, hafif=False):
     key = api_key()
     if ayar.needs_key() and not key:
         return {"rc": 5, "hata": f"anahtar bulunamadı ({ayar.api_key_env()}: ortam ya da key_files; bkz. quoteproof.example.json)"}
     workdir = base / ".oc-calisma"
     workdir.mkdir(exist_ok=True)
-    extra = {"OPENCODE_CONFIG_CONTENT": json.dumps(opencode_config(effort, base / "kaynaklar" if reader else None, search))}
+    extra = {"OPENCODE_CONFIG_CONTENT": json.dumps(opencode_config(effort, base / "kaynaklar" if reader else None, search, hafif))}
     if ayar.needs_key():
         extra[ayar.api_key_env()] = key
     if search:
@@ -360,15 +386,15 @@ def work_opencode(prompt_text, note, base, model_key, effort, timeout, search, r
     rc, out, err, timed_out = run_cmd(cmd, env=env, cwd=str(workdir), timeout=timeout + 60)
     parsed = parse_opencode_events(out)
     if timed_out:
-        return {"rc": 6, "hata": "OpenCode zaman aşımı", "jeton": parsed["jeton"], "araclar": parsed["araclar"]}
+        return {"rc": 6, "hata": "OpenCode zaman aşımı", "jeton": parsed["jeton"], "araclar": parsed["araclar"], "ayrinti": parsed["ayrinti"]}
     if rc != 0 or parsed["hatalar"]:
         why = parsed["hatalar"][0] if parsed["hatalar"] else hata_ozeti(err, out, rc or 3, "opencode")
-        return {"rc": rc or 3, "hata": redact(why)[:200], "jeton": parsed["jeton"], "araclar": parsed["araclar"]}
+        return {"rc": rc or 3, "hata": redact(why)[:200], "jeton": parsed["jeton"], "araclar": parsed["araclar"], "ayrinti": parsed["ayrinti"]}
     if not parsed["tamam"]:
         return {"rc": 7, "hata": f"akış nihai cevap (reason=stop) olmadan bitti (adım sınırı/kesinti; son adım nedeni: {parsed['son_neden'] or 'yok'})", "jeton": parsed["jeton"],
                 "araclar": parsed["araclar"]}
     note.write_text(parsed["metin"] + "\n", encoding="utf-8")
-    return {"rc": 0, "jeton": parsed["jeton"], "araclar": parsed["araclar"]}
+    return {"rc": 0, "jeton": parsed["jeton"], "araclar": parsed["araclar"], "ayrinti": parsed["ayrinti"]}
 
 
 def work_cli(prompt_text, note, model_key, timeout):
@@ -442,9 +468,10 @@ def run_worker(item, base, args, start_delay=0.0, sequence=None):
             note.unlink()
         use_mcp = backend == "opencode" and args.okuyucu == "mcp"
         try:
-            prompt_text = render(item, template, OKUMA_MCP if use_mcp else OKUMA_GENEL)
+            hafif = getattr(args, "hafif", False) is True
+            prompt_text = render(item, template, OKUMA_MCP if use_mcp else OKUMA_GENEL, hafif)
             if backend == "opencode":
-                r = work_opencode(prompt_text, note, base, args.model, args.efor, args.sure, not args.arama_yok, use_mcp)
+                r = work_opencode(prompt_text, note, base, args.model, args.efor, args.sure, not args.arama_yok, use_mcp, hafif)
             else:
                 r = work_cli(prompt_text, note, args.model, args.sure)
         except Exception as e:   # bir çalışanın beklenmedik çökmesi tüm koşuyu düşürmesin
@@ -475,7 +502,7 @@ def run_worker(item, base, args, start_delay=0.0, sequence=None):
             bad.mkdir(exist_ok=True)
             note.replace(bad / f"{slug}.deneme{result['deneme']}.md")
         result["denemeler"].append({"arka": backend, "rc": r["rc"], "hata": r.get("hata", ""), "bayt": size,
-                                    "jeton": r.get("jeton") or [0, 0], "araclar": r.get("araclar") or {}})   # deneme başına maliyet/teşhis
+                                    "jeton": r.get("jeton") or [0, 0], "araclar": r.get("araclar") or {}, "ayrinti": r.get("ayrinti")})   # deneme başına maliyet/teşhis
         if r["rc"] == 0:
             result["ok"] = True
             break
@@ -513,6 +540,7 @@ def main():
     ap.add_argument("-j", "--is", dest="jobs", type=int, default=3, help=f"paralel çalışan (en çok {MAX_PARALLEL})")
     ap.add_argument("-t", "--sure", type=int, default=420, help="çalışan başına saniye tavanı")
     ap.add_argument("--kuru", action="store_true", help="yalnız istemleri üret, çalışan koşturma")
+    ap.add_argument("--hafif", action="store_true", help="jeton tasarrufu: konuya ölçekli az arama/çağrı bütçesi, aramada en çok 4 sonuç, adım tavanı 12 (alıntı sözleşmesi ve doğrulama aynen)")
     ap.add_argument("--link-yok", action="store_true", help="denetimde bağlantı kontrolünü atla")
     ap.add_argument("--okuyucu", default="mcp", choices=["mcp", "yerlesik"],
                     help="mcp: OpenCode çalışanı sayfayı sıkıştırılmış okur (oku MCP, webfetch kapalı) · yerlesik: OpenCode webfetch (tam sayfa)")
@@ -541,7 +569,7 @@ def main():
     template = load_template()
     primary_mcp = args.arka in ("otomatik", "opencode") and args.okuyucu == "mcp"
     for item in plan:
-        (base / "istemler" / f"{item['slug']}.md").write_text(render(item, template, OKUMA_MCP if primary_mcp else OKUMA_GENEL), encoding="utf-8")
+        (base / "istemler" / f"{item['slug']}.md").write_text(render(item, template, OKUMA_MCP if primary_mcp else OKUMA_GENEL, getattr(args, "hafif", False) is True), encoding="utf-8")
     print(f"arastir: {len(plan)} istem yazıldı → {base}/istemler")
     if args.kuru:
         return 0
@@ -576,7 +604,7 @@ def main():
         (base / stale).unlink(missing_ok=True)
     if not args.devam:
         (base / "calisma.json").unlink(missing_ok=True)   # --devam: önceki kontrol noktası, bu koşu ilk sonucunu yazana dek KORUNUR
-    prompt_hash = {item["slug"]: hashlib.sha256(render(item, template, OKUMA_MCP if primary_mcp else OKUMA_GENEL).encode("utf-8")).hexdigest()[:16]
+    prompt_hash = {item["slug"]: hashlib.sha256(render(item, template, OKUMA_MCP if primary_mcp else OKUMA_GENEL, getattr(args, "hafif", False) is True).encode("utf-8")).hexdigest()[:16]
                    for item in plan}
     reused, todo = [], []
     for item in plan:
