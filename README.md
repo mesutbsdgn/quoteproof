@@ -103,6 +103,7 @@ Each finding line carries **the claim**, **a verbatim quote**, **a URL of its ow
 | `guven.py` | 0–100 source credibility heuristic | 0 tokens |
 | `rapor_kontrol.py` | Checks the **final report** against the pages it cites: catches numbers pinned to the wrong subject, quotes that are not verbatim, citations that never appeared in the research notes | 0 tokens |
 | `kapsama.py` | Checks the expected key facts listed in the plan (`olgular`) against the verified findings: "coverage 9/12, missing: …", and writes a follow-up plan that asks only for the missing facts | 0 tokens |
+| `destek.py` | Checks the **Summary and Inferences sentences** of each note: every concrete item in them (number, date, identifier such as `X25519` or `PEP 703`, acronym) must appear in the note's own quotes or on the pages it cites; reports what is only on a page, only on another question's page, or nowhere | 0 tokens |
 | `uzlas.py` | Merges the verified notes of several independent runs of the same topic: which claims were found in how many runs, what only one run found, and a merged note whose findings carry `[k/N çalıştırma]` (k of N runs) | 0 tokens |
 | `rapor_olc.py` | Measures two reports with the same yardstick (words, headings, sources, gaps) | 0 tokens |
 
@@ -282,6 +283,9 @@ List the key facts you expect in the plan (`olgular`, see above). After a run th
 **How do I get a more complete and more consistent result?**
 Run the topic more than once and merge. One run found about 80% of the key facts of a topic and varied a lot from run to run (the weakest of five runs found 8 of 12, the best 12 of 12). On two topics, the union of two runs covered about 91–92% and the union of three about 95–96% (the fact lists were written by hand from what the runs found, so these are approximate figures, not a benchmark). With `--hafif` a run costs about as much as a plain prompt, so three runs cost about one full-mode run. Run each into its own folder, then `python3 scripts/uzlas.py RUN1/notlar-temiz RUN2/notlar-temiz RUN3/notlar-temiz --cikti uzlasi.md --yaz merged/`. The merged notes pass `dogrula.py` again (35 of 35 verified in the test) and every finding carries `[k/N çalıştırma]` (k of N runs); a claim found by a single run is listed as "do not trust alone". Mix two different models if you can: runs of the same model repeat each other's gaps. In a test, three repeats of one model still covered only 9 of 12 and 11 of 13 key facts, and replacing one repeat by a different model added about one more fact on average (between 0.6 and 1.3 on the two topics, and none on one of them). Pinning the primary source pages in the plan made no reliable difference to consistency (it was a little cheaper).
 
+**Does it check the summary sentences too, or only the quotes?**
+Both, and the second check costs no model tokens either. `dogrula.py` checks every finding's quote; `destek.py` (run automatically after it, writes `destek.md`) takes the *Summary* and *Inferences* sentences and looks up each concrete item in them: numbers, dates (`24 Mart 2026` ↔ `Mar 24, 2026` ↔ `2026-03`), identifiers (`X25519`, `ML-KEM-768`, `PEP 703`) and acronyms. An item that appears in the question's own quotes is fine and stays silent. One that is only on a cited page is an *info* line ("the evidence was not carried into a quote"); one that appears only on another question's page is a *warning* (it may be pinned to the wrong subject); one that is on no cited page at all is a *strong warning* (invented, translated or computed). It also catches the usual leftover of cleaning: a summary sentence that leaned on a finding `dogrula.py` removed. It tests concrete items only: it cannot tell you that a sentence means what its source means, a clean result is not proof, and a computed value (a sum, a ratio) can raise a false alarm. The exit code is not changed; `destek.py --siki` returns 1 when a strong warning exists. On 11 saved runs of this repository it flagged 0–5 sentences per run, all at the info level after calibration; it found no confirmed invented claim there. What it did show was a summary sentence that relied on a finding the verifier had removed (an archive date), and its first strong warnings were false alarms (an HTTP status the worker had seen, an acronym only present in the URL, a `PEP 387’s` possessive); each is now handled and covered by a test.
+
 **What does it cost?**
 Measured on two narrow topics (two questions each) with a small low-cost model, from the raw event logs. Input read from the provider's cache is listed apart because it is billed far below fresh input.
 
@@ -317,7 +321,7 @@ In the author's runs, a small topic takes about 30 seconds per worker, and the a
 ## Tests
 
 ```bash
-python3 arastir-ogren/scripts/test_arastir.py   # 194 tests: parsing, contract, resume, verification, trust score, config, MCP server
+python3 arastir-ogren/scripts/test_arastir.py   # 210 tests: parsing, contract, resume, verification, trust score, config, MCP server
 python3 arastir-ogren/scripts/test_oku.py       # 54 tests: extraction, BM25, cache, SSRF, redirects, robots.txt, PDF
 ```
 
@@ -330,7 +334,7 @@ arastir-ogren/            the skill (copy or symlink into ~/.claude/skills/)
 ├── SKILL.md              coordinator instructions (Turkish)
 ├── quoteproof.example.json   configuration template (copy to ~/.config/quoteproof/config.json)
 ├── references/           worker prompt, report template, notes behind the design
-└── scripts/              arastir · denetle · dogrula · rapor_kontrol · oku · mcp_oku · guven · rapor_olc · ayar  (+ tests)
+└── scripts/              arastir · denetle · dogrula · destek · rapor_kontrol · oku · mcp_oku · guven · rapor_olc · ayar  (+ tests)
 assets/                   logo
 docs/fact-check/          the fact-check of this README (see below)
 ```
@@ -358,6 +362,7 @@ There is no tagged release yet; entries are listed newest first, by commit. Meas
 - `--temiz-yaz` removes a finding whose quote is not on the page, but the same claim can live on in the note's summary. `DISLANAN.md` now lists the remaining lines that share a number or date with the removed finding (document numbers such as `PEP 779` and citation dates are ignored), so they can be checked by hand. Found when a removed "archived on 24 March 2026" quote left that sentence in the summary. Tests: 174 + 54.
 - New `--hafif` mode for narrow topics. Measured with raw event logs, the full mode used 3–7 times the tokens of a plain prompt (search results of 12–24 thousand characters each, eight results by default, a 10–15 search budget; the cached-input part is billed far lower than fresh input). `--hafif` scales the search and call budget to the number of questions (searches = questions + 2, calls = 3 × questions + 2), asks for at most four results per search and caps the steps at 12. It ended near the plain prompt (about 1.1× the fresh input, 1.4–2× the output, 42–52 s against 101–151 s) and kept 19 of 22 quotes verbatim on the same topics. `calisma.json` now also records each attempt's token breakdown (`ayrinti`: fresh, cached, output, reasoning). Tests: 178 + 54.
 - `rapor_kontrol.py` now also reads scheme-less addresses (`kubernetes.io/blog/…`) and bare `(https://…)` addresses, so an answer written without the skill can be checked for free. Label selectors such as `app.kubernetes.io/name=…` are not taken for addresses. On a plain answer it found two translations presented as quotations. Tests: 182 + 54.
+- New `destek.py` (claim–evidence support, 0 model tokens): the Summary and Inferences sentences of every note are checked for concrete items (numbers, dates, identifiers, acronyms) that appear neither in the question's quotes nor on the pages it cites; the pipeline runs it after `dogrula.py`, writes `destek.md` and prints a warning for items found on no cited page. The exit code is unchanged. `rapor_kontrol.py` now also treats `PEP`/`JEP`/`KEP` numbers as document identifiers.
 - New `uzlas.py` (consensus): merges the verified notes of several independent runs, counts in how many runs each claim was found, lists what only one run found and writes a merged note with `[k/N çalıştırma]` (k of N runs) on every finding that passes `dogrula.py` again. Motivated by the spread between runs of the same topic (one run found about 80% of the key facts, the weakest 8 of 12). Tests: 187 + 54.
 - New `kapsama.py` and plan field `olgular` (expected key facts, never shown to the worker): the pipeline reports "coverage 7/12, missing: …", writes a follow-up plan for the missing facts and `uzlas.py --plan` shows which run found which fact. Added after measuring that one run finds only about 62–85% of a topic's key facts and that blind repeats of one model saturate. Tests: 194 + 54.
 

@@ -33,6 +33,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import ayar  # noqa: E402
+import destek  # noqa: E402
 import kapsama  # noqa: E402
 
 TEMPLATE = HERE.parent / "references" / "arastirmaci-istemi.md"
@@ -695,6 +696,19 @@ def main():
         if rc != 0:
             print(f"arastir: UYARI dogrula.py çıkış kodu {rc}; otomatik doğrulama YAPILMADI, iddiaları elle doğrulayın", file=sys.stderr)
             code = max(code, 72)
+    if not args.dogrula_yok and not args.link_yok:   # Özet/Çıkarımlar cümlelerindeki somut öğeler alıntı/sayfalarla destekli mi (0 jeton; sayfalar dogrula.py'nin önbelleğinden gelir)
+        nd = base / "notlar-temiz" if (base / "notlar-temiz").is_dir() else base / "notlar"
+        try:
+            dres = destek.run(nd, cache_dir=str(base / "kaynaklar"), files=good)
+            (base / "destek.md").write_text(destek.render(dres), encoding="utf-8")
+            dc = destek.summarize(dres)
+            strong = destek.strong_count(dres)
+            print("\n" + "=" * 60)
+            print(f"arastir: destek kontrolü: {dc['isaretli']}/{dc['cumle']} Özet/Çıkarımlar cümlesinde alıntıda olmayan somut öğe ({dc['uyarı']} uyarı · {dc['bilgi']} bilgi) → {base / 'destek.md'}")
+            if strong:
+                print(f"arastir: ⚠ {strong} somut öğe notun atıf yaptığı HİÇBİR sayfada bulunamadı (uydurma, çeviri ya da hesaplanmış değer olabilir): destek.md'deki `hiçbir-yerde` satırlarını rapora almadan kaynakta elle doğrula", flush=True)
+        except Exception as e:   # yardımcı denetim: hata ana akışı düşürmez
+            print(f"arastir: UYARI destek.py çalışmadı ({type(e).__name__}: {e}); Özet/Çıkarımlar cümleleri otomatik denetlenmedi", file=sys.stderr)
     if any(it.get("olgular") for it in plan):   # beklenen olgulara göre kapsama (0 jeton): eksikler için ek plan yazılır
         nd = base / "notlar-temiz" if (base / "notlar-temiz").is_dir() else base / "notlar"
         res = kapsama.run(plan, [nd], labels=["bu çalıştırma"], files=good)

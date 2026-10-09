@@ -120,7 +120,7 @@ def merge_findings(findings):
     return out
 
 
-IDENT_PREFIX_RE = re.compile(r"(?i)\b(?:RFC|FIPS|ISO(?:/IEC)?|IEC|SP|CVE|CWE|CAPEC|BCP|STD|AML\.T)[\s\-]*(?:\d+[-.])*$")
+IDENT_PREFIX_RE = re.compile(r"(?i)\b(?:RFC|FIPS|PEP|JEP|KEP|ISO(?:/IEC)?|IEC|SP|CVE|CWE|CAPEC|BCP|STD|AML\.T)[\s\-]*(?:\d+[-.])*$")
 
 
 def is_identifier_number(text, num):

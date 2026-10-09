@@ -103,6 +103,7 @@ Her bulgu satırında dört öğe bulunur: **iddia**, **birebir alıntı**, **bu
 | `guven.py` | 0–100 arası sezgisel kaynak güvenilirlik puanı | 0 jeton |
 | `rapor_kontrol.py` | **Son raporu**, kaynak gösterdiği sayfalarla karşılaştırır: yanlış özneye bağlanmış sayıları, birebir olmayan alıntıları ve araştırma notlarında hiç geçmeyen kaynakları yakalar | 0 jeton |
 | `kapsama.py` | Planda listelenen beklenen anahtar olguları (`olgular`) doğrulanmış bulgularla karşılaştırır: "kapsama 9/12, eksik: …"; yalnız eksik olguları soran bir ek plan yazar | 0 jeton |
+| `destek.py` | Her notun **Özet ve Çıkarımlar cümlelerini** denetler: içlerindeki her somut öğe (sayı, tarih, `X25519` ya da `PEP 703` gibi tanımlayıcı, kısaltma) notun kendi alıntılarında ya da atıf yaptığı sayfalarda geçmeli; yalnız sayfada, yalnız başka sorunun sayfasında ya da hiçbir yerde olanları bildirir | 0 jeton |
 | `uzlas.py` | Aynı konunun birkaç bağımsız çalıştırmasının doğrulanmış notlarını birleştirir: hangi iddia kaç çalıştırmada bulundu, yalnız tek çalıştırmanın bulduğu ne, ve bulguları `[k/N çalıştırma]` taşıyan birleşik not | 0 jeton |
 | `rapor_olc.py` | İki raporu aynı ölçütlerle ölçer (sözcük, başlık, kaynak, boşluk) | 0 jeton |
 
@@ -282,6 +283,15 @@ Beklediğiniz anahtar olguları plana yazın (`olgular`, yukarıya bakın). Çal
 **Daha eksiksiz ve daha tutarlı sonucu nasıl alırım?**
 Konuyu birden çok kez koşturup birleştirin. Tek bir çalıştırma konunun anahtar olgularının yaklaşık %80'ini buldu ve çalıştırmadan çalıştırmaya çok değişti (beş çalıştırmanın en zayıfı 12 olgudan 8'ini, en iyisi 12'sini buldu). İki konuda iki çalıştırmanın birleşimi yaklaşık %91–92'yi, üç çalıştırmanın birleşimi yaklaşık %95–96'yı kapsadı (olgu listelerini çalıştırmaların bulduklarından elle çıkardım; bu yüzden bunlar bir ölçüt değil, yaklaşık değerlerdir). `--hafif` ile bir çalıştırma düz istem kadar maliyetli olduğundan üç çalıştırma, tam kipte bir çalıştırma kadar tutar. Her çalıştırmayı ayrı bir klasöre alın, sonra `python3 scripts/uzlas.py KOSU1/notlar-temiz KOSU2/notlar-temiz KOSU3/notlar-temiz --cikti uzlasi.md --yaz birlesik/` çalıştırın. Birleşik notlar `dogrula.py`'den yeniden geçer (denemede 35'in 35'i doğrulandı) ve her bulgu `[k/N çalıştırma]` taşır; yalnız tek çalıştırmanın bulduğu iddia "tek başına güvenme" diye listelenir. Mümkünse iki farklı model karıştırın: aynı modelin çalıştırmaları birbirinin boşluğunu tekrarlar. Bir denemede aynı modelin üç tekrarı yine de anahtar olguların 12'de 9'unu ve 13'te 11'ini kapsadı; tekrarlardan birini farklı bir modelle değiştirmek ortalama bir olgu daha ekledi (iki konuda 0,6 ile 1,3 arası; birinde hiç eklemedi). Plana birincil kaynak sayfalarını sabitlemek tutarlılığı güvenilir biçimde değiştirmedi (biraz daha ucuzdu).
 
+**Özet cümlelerini de denetliyor mu, yoksa yalnız alıntıları mı?**
+İkisini de denetler ve ikincisi de model jetonu harcamaz. `dogrula.py` her bulgunun alıntısını sınar; `destek.py` (onun ardından kendiliğinden çalışır, `destek.md` yazar) *Özet* ve *Çıkarımlar* cümlelerini alır ve içlerindeki her somut öğeyi arar: sayılar, tarihler (`24 Mart 2026` ↔ `Mar 24, 2026` ↔ `2026-03`), tanımlayıcılar (`X25519`, `ML-KEM-768`, `PEP 703`) ve kısaltmalar. Sorunun kendi alıntılarında geçen öğe sorun değildir, sessiz kalır. Üç durum bildirilir:
+
+- Öğe yalnız kaynak gösterilen sayfada geçiyorsa bu *bilgi* satırıdır: kanıt alıntıya taşınmamış.
+- Öğe yalnız başka sorunun sayfasında geçiyorsa *uyarıdır*: yanlış özneye yapışmış olabilir.
+- Öğe kaynak gösterilen hiçbir sayfada geçmiyorsa *ciddi uyarıdır*: uydurma, çeviri ya da hesaplanmış değer olabilir.
+
+Temizliğin bıraktığı tipik artığı da yakalar: `dogrula.py`'nin çıkardığı bir bulguya yaslanan özet cümlesi. Araç yalnız somut öğeleri sınar. Bir cümlenin kaynakla aynı anlama geldiğini söyleyemez, temiz sonuç kanıt değildir ve hesaplanmış bir değer (toplam, oran) yanlış alarm verebilir. Çıkış kodunu değiştirmez; ciddi uyarı varsa `destek.py --siki` 1 döndürür. Bu deponun 11 kayıtlı çalıştırmasında çalıştırma başına 0–5 cümleyi işaretledi; ayarlandıktan sonra hepsi bilgi düzeyindeydi ve doğrulanmış bir uydurma iddia bulunmadı. Gösterdiği şey, doğrulayıcının çıkardığı bir bulguya (bir arşiv tarihine) yaslanan bir özet cümlesiydi. İlk ciddi uyarılar yanlış alarmdı: alt ajanın gördüğü bir HTTP durum kodu, yalnız adreste geçen bir kısaltma ve `PEP 387’s` iyelik eki. Üçü de artık ele alınıyor ve birer testle korunuyor.
+
 **Maliyeti nedir?**
 İki dar konuda (her biri iki soru) küçük, düşük maliyetli bir modelle, ham olay kayıtlarından ölçüldü. Sağlayıcının önbelleğinden okunan girdi, taze girdiden çok daha ucuz fiyatlandığı için ayrı gösterilir.
 
@@ -317,7 +327,7 @@ Yazarın denemelerinde küçük bir konu, alt ajan başına yaklaşık 30 saniye
 ## Testler
 
 ```bash
-python3 arastir-ogren/scripts/test_arastir.py   # 194 test: ayrıştırma, sözleşme, devam, doğrulama, güven puanı, yapılandırma, MCP sunucusu
+python3 arastir-ogren/scripts/test_arastir.py   # 210 test: ayrıştırma, sözleşme, devam, doğrulama, güven puanı, yapılandırma, MCP sunucusu
 python3 arastir-ogren/scripts/test_oku.py       # 54 test: ayıklama, BM25, önbellek, SSRF, yönlendirme, robots.txt, PDF
 ```
 
@@ -330,7 +340,7 @@ arastir-ogren/            skill (~/.claude/skills/ altına kopyalayın ya da ba�
 ├── SKILL.md              koordinatör talimatları (Türkçe)
 ├── quoteproof.example.json   yapılandırma şablonu (~/.config/quoteproof/config.json olarak kopyalayın)
 ├── references/           alt ajan istemi, rapor şablonu, tasarımın dayandığı notlar
-└── scripts/              arastir · denetle · dogrula · rapor_kontrol · oku · mcp_oku · guven · rapor_olc · ayar  (+ testler)
+└── scripts/              arastir · denetle · dogrula · destek · rapor_kontrol · oku · mcp_oku · guven · rapor_olc · ayar  (+ testler)
 assets/                   logo
 docs/fact-check/          bu README'nin doğrulaması (aşağıya bakın)
 ```
@@ -358,6 +368,7 @@ Depoda henüz etiketli sürüm yok; kayıtlar en yeniden en eskiye, commit sıra
 - `--temiz-yaz`, alıntısı sayfada bulunamayan bulguyu çıkarır; ama aynı iddia notun özetinde yaşamaya devam edebilir. `DISLANAN.md` artık, çıkarılan bulguyla aynı sayıyı ya da tarihi taşıyan kalan satırları elle bakılmak üzere listeler (`PEP 779` gibi belge numaraları ve künye tarihleri yok sayılır). Çıkarılan "24 Mart 2026'da arşivlendi" alıntısı bu cümleyi özette bıraktığında bulundu. Testler: 174 + 54.
 - Dar konular için yeni `--hafif` kipi. Ham olay kayıtlarıyla ölçüldü: tam kip, düz isteme göre 3–7 kat jeton harcıyordu (arama başına 12–24 bin karakter sonuç, varsayılan sekiz sonuç, 10–15 aramalık bütçe; önbellekten okunan girdi taze girdiden çok daha ucuz fiyatlanır). `--hafif`, arama ve çağrı bütçesini soru sayısına ölçekler (arama = soru + 2, çağrı = 3 × soru + 2), aramada en çok dört sonuç ister ve adımı 12 ile sınırlar. Düz isteme yakın bitti (taze girdi yaklaşık 1,1 kat, çıktı 1,4–2 kat, süre 101–151 sn yerine 42–52 sn) ve aynı konularda 22 alıntının 19'unu birebir korudu. `calisma.json` artık her denemenin jeton dökümünü de kaydeder (`ayrinti`: taze, önbellek, çıktı, akıl yürütme). Testler: 178 + 54.
 - `rapor_kontrol.py` artık şemasız adresleri (`kubernetes.io/blog/…`) ve çıplak `(https://…)` adreslerini de okur; böylece skill'siz yazılmış bir yanıt bedavaya denetlenebilir. `app.kubernetes.io/name=…` gibi etiket seçiciler adres sayılmaz. Düz bir yanıtta tırnak içinde sunulmuş iki çeviriyi yakaladı. Testler: 182 + 54.
+- Yeni `destek.py` (iddia–kanıt desteği, 0 model jetonu): her notun Özet ve Çıkarımlar cümlelerindeki somut öğeleri (sayı, tarih, tanımlayıcı, kısaltma) sorunun alıntılarında ve kaynak gösterdiği sayfalarda arar. İkisinde de geçmeyen öğeyi bildirir. Hat bunu `dogrula.py`'den sonra çalıştırır, `destek.md` yazar ve hiçbir sayfada bulunmayan öğeler için uyarı basar. Çıkış kodu değişmez. `rapor_kontrol.py` artık `PEP`/`JEP`/`KEP` numaralarını da belge numarası sayar.
 - Yeni `uzlas.py` (uzlaşı): birkaç bağımsız çalıştırmanın doğrulanmış notlarını birleştirir, her iddianın kaç çalıştırmada bulunduğunu sayar, yalnız tek çalıştırmanın bulduklarını listeler ve her bulgusu `[k/N çalıştırma]` taşıyan, `dogrula.py`'den yeniden geçen birleşik not yazar. Aynı konunun çalıştırmaları arasındaki farktan doğdu (bir çalıştırma anahtar olguların yaklaşık %80'ini, en zayıfı 12'de 8'ini buldu). Testler: 187 + 54.
 - Yeni `kapsama.py` ve plan alanı `olgular` (beklenen anahtar olgular; çalışana hiç gösterilmez): hat "kapsama 7/12, eksik: …" der, eksik olgular için ek plan yazar, `uzlas.py --plan` hangi çalıştırmanın hangi olguyu bulduğunu gösterir. Tek çalıştırmanın bir konunun anahtar olgularının yalnızca ≈ %62–85'ini bulduğu ve aynı modelin kör tekrarlarının doyduğu ölçüldükten sonra eklendi. Testler: 194 + 54.
 

@@ -1922,5 +1922,177 @@ class HataTeshisi(unittest.TestCase):
         self.assertIsNone(arastir.parse_opencode_events("")["son_neden"])
 
 
+import destek  # noqa: E402
+
+
+class DestekKontrol(unittest.TestCase):
+    """Özet/Çıkarımlar cümlelerindeki somut öğeler (sayı, tarih, tanımlayıcı) alıntı ve atıf yapılan sayfalarla desteklenmiş mi? (0 jeton)"""
+    URL1, URL2 = "https://example.org/a", "https://example.org/b"
+    FILL = "Lorem ipsum dolor sit amet consectetur adipiscing elit. " * 20
+
+    def _note(self, d, ozet, cikarim="", q1_quote="The overhead is about 8% on x86-64 Linux.", q2=""):
+        text = (f"# Konu: Python 3.14 serbest iş parçacığı\n\n## Soru 1\n### Özet\n{ozet}\n### Alıntılı bulgular\n"
+                f"- Ek yük — \"{q1_quote}\" — [A]({self.URL1}) (2025-10, birincil)\n### Çıkarımlar\n{cikarim or '- (yok)'}\n### Boşluklar\n- (belirtilmedi)\n")
+        if q2:
+            text += f"\n## Soru 2\n### Özet\nİkinci soru özeti burada yazıyor.\n### Alıntılı bulgular\n- Başka — \"{q2}\" — [B]({self.URL2}) (2025-10, birincil)\n### Çıkarımlar\n- (yok)\n### Boşluklar\n- (belirtilmedi)\n"
+        (Path(d) / "konu.md").write_text(text, encoding="utf-8")
+
+    def _run(self, d, pages=None):
+        pages = pages if pages is not None else {self.URL1: self.FILL + " about 8% on x86-64 Linux, 12 ms and X25519 here. ", self.URL2: self.FILL + " 4096 bits. "}
+        loader = lambda u: {"ok": u in pages, "markdown": pages.get(u, ""), "hata": "" if u in pages else "yok"}
+        return destek.run(d, loader=loader)
+
+    def _flags(self, res):
+        return sorted((f["tur"], f["oge"]) for r in res.values() for q in r["sorular"] for s in q["cumleler"] for f in s["bulgular"])
+
+    def test_alintida_olan_sayi_sessiz(self):
+        with tempfile.TemporaryDirectory() as d:
+            self._note(d, "Ek yük x86-64 Linux üzerinde yaklaşık %8 ölçüldü.")
+            self.assertEqual(self._flags(self._run(d)), [])
+
+    def test_hicbir_sayfada_olmayan_sayi_guclu_uyari(self):
+        with tempfile.TemporaryDirectory() as d:
+            self._note(d, "Ek yük yaklaşık %37 olarak ölçüldü.")
+            res = self._run(d)
+            self.assertEqual(self._flags(res), [("hiçbir-yerde", "%37")])
+            self.assertEqual(destek.strong_count(res), 1)
+            self.assertEqual(destek.summarize(res)["uyarı"], 1)
+
+    def test_sayfada_var_alintida_yok_bilgi(self):
+        with tempfile.TemporaryDirectory() as d:
+            self._note(d, "Gecikme 12 ms olarak verildi.")
+            res = self._run(d)
+            self.assertEqual(self._flags(res), [("sayfada", "12 ms")])
+            self.assertEqual(destek.summarize(res)["bilgi"], 1)
+            self.assertEqual(destek.strong_count(res), 0)
+
+    def test_baska_sorunun_sayfasindaki_sayi_yanlis_yere_yapismis_olabilir(self):
+        with tempfile.TemporaryDirectory() as d:
+            self._note(d, "Anahtar uzunluğu 4096 bit.", q2="The key is 4096 bits.")
+            f = self._flags(self._run(d))
+            self.assertEqual(f, [("başka-sayfada", "4096")])
+            self.assertEqual(destek.strong_count(self._run(d)), 0)
+
+    def test_tanimlayici_rakamlari_ayri_sayi_olarak_aranmaz(self):
+        items = destek.concrete_items("X25519 anahtar değişimi ve ML-KEM-768 kullanılır.", set())
+        self.assertEqual(sorted((i["tur"], i["etiket"]) for i in items), [("tanim", "ML-KEM-768"), ("tanim", "X25519")])
+
+    def test_belge_numarasi_tanimlayici_olarak_aranir(self):
+        items = destek.concrete_items("PEP 703 ve RFC 9309 belirler.", set())
+        self.assertEqual(sorted(i["etiket"] for i in items if i["tur"] == "tanim"), ["PEP 703", "RFC 9309"])
+        self.assertFalse([i for i in items if i["tur"] == "sayi"])
+        with tempfile.TemporaryDirectory() as d:
+            self._note(d, "Bunu PEP 387 belirler.")
+            self.assertEqual(self._flags(self._run(d)), [("hiçbir-yerde", "PEP 387")])
+
+    def test_aralik_iki_uc_degeri_ayri_yazilmissa_destekli(self):
+        q = "Overhead ranges from about 1% on macOS aarch64 to 8% on x86-64 Linux systems."
+        with tempfile.TemporaryDirectory() as d:
+            self._note(d, "Ek yük platforma göre %1–8 aralığında.", q1_quote=q)
+            self.assertEqual(self._flags(self._run(d)), [])
+        with tempfile.TemporaryDirectory() as d:
+            self._note(d, "Ek yük platforma göre %1–9 aralığında.", q1_quote=q)
+            self.assertEqual(len(self._flags(self._run(d))), 1)       # 9 hiçbir yerde yok
+
+    def test_tarih_tr_en_ay_adiyla_eslesir_ve_bugun_atilir(self):
+        q = "This repository was archived by the owner on Mar 24, 2026. It is now read-only."
+        today = {datetime.date(2026, 10, 9)}
+        self.assertEqual([i["etiket"] for i in destek.concrete_items("Depo 24 Mart 2026'da arşivlendi.", today)], ["24 Mart 2026"])
+        self.assertEqual(destek.concrete_items("Bugün (2026-10-09) ve Ekim 2026 itibarıyla.", today), [])
+        with tempfile.TemporaryDirectory() as d:
+            self._note(d, "Depo 24 Mart 2026'da arşivlendi.", q1_quote=q)
+            self.assertEqual(self._flags(self._run(d)), [])
+        with tempfile.TemporaryDirectory() as d:
+            self._note(d, "Depo 25 Nisan 2025'te arşivlendi.", q1_quote=q)
+            self.assertEqual([t for t, _ in self._flags(self._run(d))], ["hiçbir-yerde"])
+
+    def test_ek_kesmesi_sayi_sinirini_bozmaz_ve_konu_basligi_verilmistir(self):
+        with tempfile.TemporaryDirectory() as d:
+            self._note(d, "Python 3.14'te yapı desteklenir.")
+            self.assertEqual(self._flags(self._run(d)), [])           # "3.14" başlıkta: iddia değil, konu
+
+    def test_kisaltma_yalniz_hicbir_yerde_ise_soylenir(self):
+        with tempfile.TemporaryDirectory() as d:
+            self._note(d, "Bunu SIG kararlaştırdı.", q2="SIG Network met.")
+            pages = {self.URL1: self.FILL, self.URL2: self.FILL + " SIG Network "}
+            self.assertEqual(self._flags(self._run(d, pages)), [])    # başka sayfada var: kısaltma zayıf sinyal, sessiz
+            self.assertEqual(self._flags(self._run(d, {self.URL1: self.FILL, self.URL2: self.FILL}))[0][0], "hiçbir-yerde")
+
+    def test_http_durum_kodu_ve_adres_dizgisindeki_ad_yanlis_alarm_vermez(self):
+        self.assertEqual(destek.concrete_items("Blog adresi 404 verdi.", set()), [])
+        with tempfile.TemporaryDirectory() as d:
+            self._note(d, "Ayrıntı HOWTO belgesinde.")
+            self.assertEqual(self._flags(self._run(d)), [("hiçbir-yerde", "HOWTO")])      # sayfada da adreste de yok
+            note = Path(d, "konu.md")
+            note.write_text(note.read_text(encoding="utf-8").replace(self.URL1, "https://example.org/howto/guide"), encoding="utf-8")
+            self.assertEqual(self._flags(self._run(d, {"https://example.org/howto/guide": self.FILL})), [])   # adres "howto" diyor
+
+    def test_okunamayan_sayfada_yok_denmez(self):
+        with tempfile.TemporaryDirectory() as d:
+            self._note(d, "Ek yük %37 ölçüldü.")
+            res = self._run(d, pages={})
+            self.assertEqual(self._flags(res), [])
+            self.assertEqual(res["konu"]["sorular"][0]["okunamayan"], [self.URL1])
+            self.assertIn("denetlenemedi", destek.render(res))
+
+    def test_cikarim_ve_birim_cikti_ve_siki_cikis_kodu(self):
+        with tempfile.TemporaryDirectory() as d:
+            self._note(d, "Düz özet cümlesi burada yazıyor.", cikarim="- Maliyet 90 kat artar (çıkarım).")
+            res = self._run(d)
+            self.assertTrue(res["konu"]["sorular"][0]["cumleler"][0]["cikarim"])
+            text = destek.render(res)
+            self.assertIn("hiçbir-yerde", text)
+            self.assertIn("(çıkarım)", text)
+            out = Path(d) / "destek.md"
+            with contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(destek.main(["/yok/dizin"]), 2)
+            pages = {self.URL1: self.FILL}
+            with mock.patch.object(destek.oku, "load", side_effect=lambda u, cache_dir=None: {"ok": True, "markdown": pages[u], "hata": ""}):
+                self.assertEqual(destek.main([d, "--cikti", str(out)]), 0)
+                self.assertEqual(destek.main([d, "--cikti", str(out), "--siki"]), 1)
+            self.assertTrue(out.is_file())
+
+    def test_rapor_kontrol_pep_numarasini_olculen_deger_saymaz(self):
+        self.assertTrue(rapor_kontrol.is_identifier_number("PEP 779 kabul etti", "779"))
+
+
+class DestekHatti(unittest.TestCase):
+    """arastir.py, dogrula'dan sonra destek.py'yi çalıştırır, destek.md yazar, güçlü bulguyu uyarır ve çıkış kodunu DEĞİŞTİRMEZ."""
+    NOTE = ("# Konu\n\n## Soru 1\n### Özet\nEk yük yaklaşık %37 ölçüldü.\n### Alıntılı bulgular\n"
+            "- Ek yük — \"The overhead is about 8% on x86-64 Linux.\" — [A](https://example.org/a) (2025-10, birincil)\n"
+            "- Ek yük b — \"The overhead is about 8% on x86-64 Linux.\" — [B](https://example.org/b) (2025-10, birincil)\n"
+            "- Ek yük c — \"The overhead is about 8% on x86-64 Linux.\" — [C](https://example.org/c) (2025-10, birincil)\n"
+            "### Çıkarımlar\n- (yok)\n### Boşluklar\n- (belirtilmedi)\n")
+
+    def _main(self, d, extra=()):
+        Path(d, "PLAN.json").write_text(json.dumps([{"slug": "konu", "konu": "k", "sorular": ["s?"], "min_url": arastir.MIN_URLS}]), encoding="utf-8")
+        def fake(item, base, args, delay=0.0, sequence=None):
+            (base / "notlar" / f"{item['slug']}.md").write_text(self.NOTE)
+            return {"slug": item["slug"], "ok": True, "deneme": 1, "arka": "cli", "rc": 0, "hata": "", "bayt": len(self.NOTE),
+                    "sure_sn": 1, "denemeler": [], "jeton": [1, 1], "araclar": {}}
+        argv = ["arastir.py", str(Path(d) / "PLAN.json"), "-d", d, "--arka", "cli", *extra]
+        page = {"ok": True, "markdown": "Lorem ipsum dolor sit amet. " * 30 + "about 8% on x86-64 Linux", "hata": ""}
+        out = io.StringIO()
+        with mock.patch.object(sys, "argv", argv), mock.patch.object(arastir, "available_backends", return_value={"cli"}), \
+             mock.patch.object(arastir, "run_worker", side_effect=fake), mock.patch.object(destek.oku, "load", return_value=page), \
+             mock.patch.object(arastir.subprocess, "run", return_value=mock.Mock(returncode=0)), contextlib.redirect_stdout(out):
+            rc = arastir.main()
+        return rc, out.getvalue()
+
+    def test_destek_md_yazilir_guclu_bulgu_uyarilir_cikis_kodu_degismez(self):
+        with tempfile.TemporaryDirectory() as d:
+            rc, out = self._main(d)
+            self.assertEqual(rc, 0)
+            self.assertIn("destek kontrolü", out)
+            self.assertIn("HİÇBİR sayfada", out)
+            self.assertIn("%37", (Path(d) / "destek.md").read_text(encoding="utf-8"))
+
+    def test_link_yok_ile_destek_calismaz(self):
+        with tempfile.TemporaryDirectory() as d:
+            rc, out = self._main(d, ["--link-yok"])
+            self.assertNotIn("destek kontrolü", out)
+            self.assertFalse((Path(d) / "destek.md").exists())
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)
