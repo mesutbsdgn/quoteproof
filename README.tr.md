@@ -10,6 +10,7 @@
 <p align="center">
   <a href="README.md">English</a> · <a href="README.tr.md">Türkçe</a>
   &nbsp;|&nbsp;
+  <a href="https://github.com/mesutbsdgn/quoteproof/tree/v1.5"><img alt="sürüm" src="https://img.shields.io/badge/s%C3%BCr%C3%BCm-v1.5-blue"></a>
   <img alt="lisans" src="https://img.shields.io/badge/lisans-AGPL--3.0-blue">
   <img alt="python" src="https://img.shields.io/badge/python-3.9%2B-informational">
   <img alt="bağımlılık" src="https://img.shields.io/badge/ba%C4%9F%C4%B1ml%C4%B1l%C4%B1k-yok-success">
