@@ -64,7 +64,7 @@ ROBOTS_MAX_PATTERN = 2048
 ROBOTS_MAX_RULES = 5000
 ROBOTS_ENABLED = os.environ.get("OKU_ROBOTS", "1") != "0"   # çalışan MCP'sine bu değişken geçmez (env izin listesi): çalışanlar HER ZAMAN uyar
 CACHE_TTL = 6 * 3600
-CACHE_VERSION = "v6"   # v6: Blogger <script type=text/template> makale gövdesi okunur (v5: MathML <annotation> atılır; v4: PDF okuma sırası)
+CACHE_VERSION = "v7"   # v7: PDF metni artık 60 sayfada kesilmez (v6: Blogger <script type=text/template> gövdesi; v5: MathML <annotation>; v4: PDF okuma sırası)
 TEXT_TYPES = ("text/html", "application/xhtml+xml", "text/plain", "text/markdown", "text/x-markdown")
 INJECTION = re.compile(
     r"ignore (all |the )?(previous|prior|above) (instructions|prompts)|disregard (the )?(previous|above)|"
@@ -725,6 +725,10 @@ def github_readme(url):
 
 
 def pdf_to_markdown(body):
+    """PDF'nin tüm sayfalarını okuma sırasıyla çıkarır; sayfa sayısı sınırı yoktur.
+
+    İndirme boyutu ve pdftotext'in 40 saniyelik süresi gibi diğer okuyucu sınırları geçerlidir.
+    """
     if not shutil.which("pdftotext"):
         return None, "PDF için `pdftotext` kurulu değil (brew install poppler)"
     with tempfile.NamedTemporaryFile(suffix=".pdf") as f:
@@ -732,7 +736,8 @@ def pdf_to_markdown(body):
         f.flush()
         # OKUMA SIRASI modu (varsayılan): `-layout` iki sütunlu makalelerde (USENIX/ACM/IEEE) sütunları satır satır karıştırır ve birden çok
         # satıra yayılan cümleler sayfada "bulunamaz" olur (gerçek koşuda 5 alıntının 3'ü kaçtı; okuma sırasında 5'i de bulundu).
-        proc = subprocess.run(["pdftotext", "-l", "60", f.name, "-"], capture_output=True, text=True, timeout=40)
+        # `-l 60` PDF'lerin devamını sessizce kesiyordu; sayfa sınırı koymadan tamamını çıkar.
+        proc = subprocess.run(["pdftotext", f.name, "-"], capture_output=True, text=True, timeout=40)
     if proc.returncode != 0 or not proc.stdout.strip():
         return None, "PDF metni çıkarılamadı (taranmış/şifreli olabilir)"
     pages = [p.strip() for p in proc.stdout.split("\f") if p.strip()]

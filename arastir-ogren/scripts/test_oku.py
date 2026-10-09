@@ -452,7 +452,20 @@ class PdfOkumaSirasi(unittest.TestCase):
             md, why = oku.pdf_to_markdown(b"%PDF-1.4")
         self.assertNotIn("-layout", seen["cmd"])
         self.assertIn("## Sayfa 2", md)
-        self.assertEqual(oku.CACHE_VERSION, "v6")      # eski -layout (v3), MathML-yinelemeli (v4) ve Blogger-gövdesiz (v5) önbellekleri geçersiz
+        self.assertEqual(oku.CACHE_VERSION, "v7")      # PDF sayfa sınırı değişti; eski -layout/MathML/Blogger önbellekleri de geçersiz
+
+    def test_60_sayfayi_asan_pdf_tamami_cikarilir(self):
+        seen = {}
+        body = "\f".join(f"Sayfa metni {n}" for n in range(1, 66))
+        def fake_run(cmd, **kw):
+            seen["cmd"] = cmd
+            return mock.Mock(returncode=0, stdout=body, stderr="")
+        with mock.patch.object(oku.shutil, "which", return_value="/bin/pdftotext"), mock.patch.object(oku.subprocess, "run", side_effect=fake_run):
+            md, why = oku.pdf_to_markdown(b"%PDF-1.4")
+        self.assertEqual(why, "")
+        self.assertNotIn("-l", seen["cmd"])
+        self.assertIn("## Sayfa 61", md)
+        self.assertIn("Sayfa metni 65", md)
 
 
 class MathMlYinelemesi(unittest.TestCase):
@@ -469,8 +482,8 @@ class MathMlYinelemesi(unittest.TestCase):
         self.assertNotIn("+3.3+3.3", md)
         self.assertNotIn("\\times", md)
 
-    def test_onbellek_surumu_v6(self):
-        self.assertEqual(oku.CACHE_VERSION, "v6")
+    def test_onbellek_surumu_v7(self):
+        self.assertEqual(oku.CACHE_VERSION, "v7")
 
 
 class BloggerGovdesi(unittest.TestCase):

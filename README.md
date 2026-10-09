@@ -95,6 +95,7 @@ Each finding line carries **the claim**, **a verbatim quote**, **a URL of its ow
 
 | Script | Role | Cost |
 |---|---|---|
+| `ayar.py` | Shows configuration, the active model and back-ends, and whether a key is available; never prints key values | 0 tokens |
 | `arastir.py` | Runs the workers in parallel, retries, falls back across back-ends, writes `notes/<slug>.md`, then runs the audit and verification | cheap model |
 | `denetle.py` | Audits notes: format, link liveness, GitHub repository existence/activity, **source trust**, picks claims worth a manual look | 0 tokens |
 | `dogrula.py` | Looks up every quote / number / version / code token on the cited page and issues verdicts | 0 tokens |
@@ -348,8 +349,8 @@ In the author's runs, a small topic takes about 30 seconds per worker, and the a
 ## Tests
 
 ```bash
-python3 arastir-ogren/scripts/test_arastir.py   # 219 tests: parsing, contract, resume, verification, trust score, config, MCP server
-python3 arastir-ogren/scripts/test_oku.py       # 54 tests: extraction, BM25, cache, SSRF, redirects, robots.txt, PDF
+python3 arastir-ogren/scripts/test_arastir.py   # 241 tests: parsing, contract, resume, verification, trust score, config, MCP server
+python3 arastir-ogren/scripts/test_oku.py       # 57 tests: extraction, BM25, cache, SSRF, redirects, robots.txt, PDF
 ```
 
 Both suites run without network access.

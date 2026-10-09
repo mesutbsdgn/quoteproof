@@ -8,8 +8,9 @@ tekrarlar farklı olguları kaçırıyor; bir olgu listesi olmadan "tamam mı?" 
 Plan alanı `olgular` (çalışana VERİLMEZ; yalnız ölçüm içindir): liste; her öğe
   {"ad": "İnsan okur açıklama", "ara": "regex"}            ara: büyük/küçük harf duyarsız; liste de olabilir (herhangi biri yeter)
   ya da "açıklama :: regex"
-Bir olgu, notun "Alıntılı bulgular" maddelerinde (doğrulanmış/temizlenmiş notta: kaynakta bulunan maddelerde) eşleşirse kapsanmıştır. Özet/Boşluklar eşleşmez:
-"doğrulanamadı" cümlesi bir olguyu kapsanmış göstermesin.
+Bir olgu, `dogrulama.json` içinde aynı dosya ve bulgu için karar "Doğrulandı" ise ve o bulgu
+"Alıntılı bulgular" maddelerinde eşleşirse kapsanmıştır. Kısmen/Erişilemedi/Kanıt yok/Bulunamadı
+ve doğrulama kaydı olmayan maddeler sayılmaz. Özet/Boşluklar hiçbir zaman eşleşmez.
 Olgu listesini kaynağı görmeden yazdıysan yanlış olabilir: hiçbir koşunun bulmadığı olgu "bulunamadı" ya da "beklenti yanlış" olabilir; elle bak.
 
 Kullanım:
@@ -72,13 +73,46 @@ def olgulari_oku(item):
 
 
 def bulgu_satirlari(path):
-    """Notun "Alıntılı bulgular" madde satırları (Özet/Çıkarımlar/Boşluklar hariç)."""
-    _, questions = denetle.parse_note(Path(path))
+    """Notun denetle.py ile aynı ayrıştırılmış "Alıntılı bulgular" maddeleri."""
+    return denetle.analyze(Path(path))["findings"]
+
+
+def _claim_key(text):
+    return re.sub(r"\s+", " ", text or "").strip()
+
+
+def dogrulama_kararlari(path):
+    """dogrulama.json satırlarını (dosya, iddia) anahtarıyla sırayı koruyarak grupla.
+
+    Aynı metinli yinelenmiş maddeler için sıralı liste tutulur; dogrula.py aynı güçteki
+    eşit iddiaları kaynak sırasıyla işler.
+    """
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    if not isinstance(data, dict) or not isinstance(data.get("satirlar"), list):
+        return {}
+    out = {}
+    for row in data["satirlar"]:
+        if not isinstance(row, dict):
+            continue
+        name, claim, verdict = row.get("not"), row.get("iddia"), row.get("karar")
+        if isinstance(name, str) and isinstance(claim, str) and isinstance(verdict, str):
+            out.setdefault((name, _claim_key(claim)), []).append(verdict)
+    return out
+
+
+def verified_bulgu_satirlari(path, decisions):
+    """Yalnız dogrulama.json'da aynı not maddesi için Doğrulandı olan bulgular."""
+    pending = {key: list(values) for key, values in decisions.items()}
     out = []
-    for q in questions:
-        for line in q["bolumler"].get("Alıntılı bulgular", []):
-            if denetle.BULLET_RE.match(line.strip()):
-                out.append(line.strip())
+    for finding in bulgu_satirlari(path):
+        key = (Path(path).name, _claim_key(finding["metin"]))
+        verdicts = pending.get(key, [])
+        verdict = verdicts.pop(0) if verdicts else None
+        if verdict == "Doğrulandı":
+            out.append(finding["metin"])
     return out
 
 
@@ -91,13 +125,19 @@ def run(plan, dirs, labels=None, files=None):
     labels = labels or [Path(d).resolve().parent.name if Path(d).name.startswith("notlar") else Path(d).name for d in dirs]
     if len(set(labels)) != len(labels):
         labels = [f"{l}#{i + 1}" for i, l in enumerate(labels)]
+    decisions_by_label = {lab: dogrulama_kararlari(Path(d).resolve().parent / "dogrulama.json")
+                          for lab, d in zip(labels, dirs)}
     out = {}
     for item in plan if isinstance(plan, list) else []:
         facts = olgulari_oku(item)
         slug = item.get("slug")
         if not facts or not slug or (files is not None and f"{slug}.md" not in set(files)):
             continue
-        lines = {lab: bulgu_satirlari(Path(d) / f"{slug}.md") for lab, d in zip(labels, dirs) if (Path(d) / f"{slug}.md").is_file()}
+        lines = {}
+        for lab, d in zip(labels, dirs):
+            note = Path(d) / f"{slug}.md"
+            if note.is_file():
+                lines[lab] = verified_bulgu_satirlari(note, decisions_by_label[lab])
         if not lines:
             continue
         rows = [{"ad": f["ad"], "ara": f["ara"], "kapsayan": [lab for lab, sat in lines.items() if _eslesir(f["rx"], sat)]} for f in facts]
@@ -127,7 +167,7 @@ def render(res):
             L += ["", "Eksik olgular (ya bulunamadı ya da beklenti/regex yanlış; elle bak): " + "; ".join(e["ad"] for e in r["eksik"]),
                   "Hedefli ek çalıştırma için: `--eksik-plan` ile ek plan üret."]
         L.append("")
-    L.append("Not: kapsama yalnız \"Alıntılı bulgular\" maddelerine bakar ve regex eşleşmesidir; olgunun doğru anlaşıldığını değil, bulgularda geçtiğini söyler.")
+    L.append("Not: yalnız dogrulama.json içinde aynı dosya ve bulgu için \"Doğrulandı\" kararı olan \"Alıntılı bulgular\" sayılır. Kısmen, Erişilemedi, Kanıt yok, Bulunamadı ve doğrulama kaydı olmayan maddeler dışarıda kalır. Kapsama yine regex eşleşmesidir; olgunun doğru anlaşıldığını kanıtlamaz.")
     return "\n".join(L) + "\n"
 
 

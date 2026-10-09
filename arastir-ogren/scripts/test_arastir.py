@@ -88,6 +88,19 @@ class OpenCodeParse(unittest.TestCase):
         self.assertEqual(r["adimlar"][0]["onbellek"], 12)
         self.assertFalse(note.exists())
 
+    def test_opencode_not_yazma_yolu_yapilandirilmis_sir_degerini_maskeler(self):
+        secret = "sk/ABC+def==123456"
+        answer = GOOD_NOTE + f'\n{{"api_key":"{secret}"}}'
+        out = "\n".join([ev("step_start"), ev("text", text=answer), ev("step_finish", reason="stop")])
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(arastir, "run_cmd", return_value=(0, out, "", False)), \
+             mock.patch.object(arastir, "opencode_argv", return_value=["opencode"]):
+            note = Path(d) / "n.md"
+            result = arastir.work_opencode("P", note, Path(d), "fast", "dusuk", 10, False)
+            written = note.read_text(encoding="utf-8")
+        self.assertEqual(result["rc"], 0)
+        self.assertNotIn(secret, written)
+        self.assertIn('"api_key":"[GİZLİ]"', written)
+
     def test_isci_zaman_asiminda_profili_denemeye_yazar(self):
         profile = [{"adim": 1, "araclar": {"oku_sayfa_oku": 1}, "neden": "tool-calls",
                     "taze": 2, "onbellek": 12, "cikti": 1, "akil": 0}]
@@ -202,9 +215,28 @@ class Security(unittest.TestCase):
         self.assertNotIn("mcp", cfg)
 
     def test_gizli_deger_sansurlenir(self):
-        masked = arastir.redact('401 {"api_key": "sk-abcdefghijkl1234"} Authorization: Bearer abcdefgh12345678')
+        masked = arastir.redact('401 {"api_key": "sk-abcdefghijkl1234/+==", "accessToken": "tok+en/with==symbols"} Authorization: Bearer abcdefgh12345678')
         self.assertNotIn("abcdefghijkl1234", masked)
+        self.assertNotIn("tok+en/with==symbols", masked)
         self.assertNotIn("abcdefgh12345678", masked)
+        structured = json.loads(masked[masked.index("{"):masked.index("}") + 1])
+        self.assertEqual(structured["api_key"], "[GİZLİ]")
+        self.assertEqual(structured["accessToken"], "[GİZLİ]")
+
+    def test_yapilandirilmis_sir_degeri_dogrudan_cikti_nesnesinde_de_maskelenir(self):
+        safe = arastir.redact_data({"nested": [{"api_key": "anahtar-degeri", "normal": "açık"}],
+                                    "clientSecret": "sır-değeri", "AWS_SECRET_ACCESS_KEY": "aws-secret-value"})
+        self.assertEqual(safe, {"nested": [{"api_key": "[GİZLİ]", "normal": "açık"}],
+                                "clientSecret": "[GİZLİ]", "AWS_SECRET_ACCESS_KEY": "[GİZLİ]"})
+
+    def test_dosya_ciktilarinda_json_yapisi_korunarak_sirler_maskelenir(self):
+        with tempfile.TemporaryDirectory() as d:
+            out = Path(d) / "calisma.json"
+            out.write_text(json.dumps({"api_key": "json-secret-value", "hata": 'token: "inline-secret-value"'}), encoding="utf-8")
+            arastir.redact_file(out)
+            result = json.loads(out.read_text(encoding="utf-8"))
+        self.assertEqual(result["api_key"], "[GİZLİ]")
+        self.assertNotIn("inline-secret-value", result["hata"])
 
     def test_adim_siniri_efora_gore(self):
         self.assertEqual(arastir.opencode_config("dusuk")["agent"]["plan"]["steps"], 16)
@@ -1194,6 +1226,13 @@ class CliMetinBicimi(unittest.TestCase):
         self.assertEqual(written.strip(), GOOD_NOTE.strip())
         self.assertTrue(arastir.check_contract(written)[0])        # sözleşme denetimi yine uygulanır
 
+    def test_not_yazma_yolu_yapilandirilmis_sir_degerini_maskeler(self):
+        secret = "sk/ABC+def==123456"
+        r, written = self._run("text", GOOD_NOTE + f'\n{{"apiKey":"{secret}"}}')
+        self.assertEqual(r["rc"], 0)
+        self.assertNotIn(secret, written)
+        self.assertIn('"apiKey":"[GİZLİ]"', written)
+
     def test_metin_bicimi_bos_cikti_ve_hatali_cikis_kodu_basarisiz_sayilir(self):
         r, written = self._run("text", "  \n")
         self.assertNotEqual(r["rc"], 0)
@@ -1881,8 +1920,22 @@ class AnahtarOlguKapsamasi(unittest.TestCase):
     def _dirs(self, d, notes):
         out = []
         for name, text in notes:
-            p = Path(d) / name / "notlar-temiz"; p.mkdir(parents=True); (p / "konu.md").write_text(text, encoding="utf-8"); out.append(str(p))
+            p = Path(d) / name / "notlar-temiz"; p.mkdir(parents=True)
+            note = p / "konu.md"; note.write_text(text, encoding="utf-8")
+            rows = [{"not": note.name, "iddia": f["metin"], "karar": "Doğrulandı"}
+                    for f in denetle.analyze(note)["findings"]]
+            (p.parent / "dogrulama.json").write_text(json.dumps({"satirlar": rows}, ensure_ascii=False), encoding="utf-8")
+            out.append(str(p))
         return out
+
+    def _set_verdicts(self, note_dir, verdicts):
+        note = Path(note_dir) / "konu.md"
+        findings = denetle.analyze(note)["findings"]
+        self.assertEqual(len(findings), len(verdicts))
+        rows = [{"not": note.name, "iddia": f["metin"], "karar": verdict}
+                for f, verdict in zip(findings, verdicts)]
+        (Path(note_dir).resolve().parent / "dogrulama.json").write_text(
+            json.dumps({"satirlar": rows}, ensure_ascii=False), encoding="utf-8")
 
     def test_olgu_bicimleri_ve_hatalar(self):
         o = kapsama.olgulari_oku(self.ITEM)
@@ -1902,6 +1955,33 @@ class AnahtarOlguKapsamasi(unittest.TestCase):
         self.assertEqual((r["kapsanan"], r["toplam"]), (1, 4))
         covered = {x["ad"] for x in r["olgular"] if x["kapsayan"]}
         self.assertEqual(covered, {"bakım Mart 2026'ya kadar"})        # "archived" Özet'te, "JIT" Boşluklar'da: sayılmadı
+
+    def test_kismen_erisilemedi_ve_kanit_yok_olgular_kapsamaya_girmez(self):
+        text = self._not([
+            ("Takvim", "Best-effort maintenance will continue until March 2026"),
+            ("Yama", "There will be no further releases of any kind"),
+            ("Arşiv", "The repository was archived by the owner"),
+            ("JIT", "This package does not support JIT"),
+        ])
+        with tempfile.TemporaryDirectory() as d:
+            dirs = self._dirs(d, [("r1", text)])
+            self._set_verdicts(dirs[0], ["Doğrulandı", "Kısmen", "Erişilemedi", "Kanıt yok"])
+            res = kapsama.run([self.ITEM], dirs)
+        r = res["konu"]
+        self.assertEqual((r["kapsanan"], r["toplam"]), (1, 4))
+        by = {x["ad"]: x["kapsayan"] for x in r["olgular"]}
+        self.assertEqual(by["bakım Mart 2026'ya kadar"], ["r1"])
+        self.assertEqual(by["yama/sürüm yok"], [])
+        self.assertEqual(by["arşivlendi"], [])
+        self.assertEqual(by["JIT desteklenmez"], [])
+        self.assertIn('"Doğrulandı"', kapsama.render(res))
+
+    def test_dogrulama_json_yoksa_bulgu_kapsama_sayilmaz(self):
+        with tempfile.TemporaryDirectory() as d:
+            dirs = self._dirs(d, [("r1", self._not([("Takvim", "until March 2026 maintenance")]))])
+            (Path(dirs[0]).resolve().parent / "dogrulama.json").unlink()
+            res = kapsama.run([self.ITEM], dirs)
+        self.assertEqual((res["konu"]["kapsanan"], res["konu"]["toplam"]), (0, 4))
 
     def test_birden_cok_calistirma_olgu_basina_sayar_ve_birlesimi_verir(self):
         a = self._not([("Takvim", "Best-effort maintenance will continue until March 2026"), ("Yok", "There will be no further releases of any kind")])

@@ -83,7 +83,12 @@ BROAD_TOPIC_ENTITIES = 6   # bir konuda bu kadar ya da daha çok varlık (ülke/
 MIN_URLS = 3        # varsayılan kabul eşiği; dar konular planda min_url_required ile düşürebilir
 MIN_URLS_REQUIRED_MIN = 2  # kabul eşiğinde en az iki farklı URL ile çapraz kaynak gerekir
 WEAK_URLS = 8       # bunun altı kabul edilir ama "zayıf" işaretlenir (çıkış kodu 73; örn. arama 429'a düştü)
-SECRET_RE = re.compile(r"(?i)(api[_-]?key|token|secret|authorization|bearer)([\"'\s:=]+)[A-Za-z0-9._\-]{8,}")
+SECRET_FIELD = r"(?:[a-z0-9]+[_-])?(?:secret[_-]?access[_-]?key|api[_-]?key|access[_-]?token|refresh[_-]?token|id[_-]?token|client[_-]?secret|private[_-]?key|token|secret|authorization|bearer|password|passwd|credential)"
+SECRET_FIELD_RE = re.compile(rf"^(?:{SECRET_FIELD})$", re.I)
+SECRET_RE = re.compile(
+    rf"(?i)(?P<prefix>[\"']?{SECRET_FIELD}[\"']?(?:\s*[:=]\s*|\s+))"
+    r"(?P<value>\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*'|Bearer\s+[^\s,;}\]]+|[^\s,;}\]]+)"
+)
 # Araç çağrısı döngüsünü sınırlar: sınıra gelince OpenCode araçsız nihai cevap yazmaya zorlar (aksi halde sonsuza dek arayabilir).
 STEPS_BY_EFFORT = {"dusuk": 16, "orta": 24, "yuksek": 32}
 HAFIF_ADIM = 9      # --hafif kipinde nihai metne daha erken geç; MCP okuyucu ayrıca gerçek çağrı sınırına sahiptir
@@ -309,8 +314,52 @@ def parse_opencode_events(stdout):
 
 
 def redact(text):
-    """Hata/günlük metninden anahtar benzeri değerleri siler (sonuç dosyasına ve ekrana sızmasın)."""
-    return SECRET_RE.sub(lambda m: m.group(1) + m.group(2) + "[GİZLİ]", text or "")
+    """Metin/JSON içindeki anahtar değerlerini karartır (hata, not ve sonuç dosyalarında)."""
+    def mask(match):
+        value = match.group("value")
+        if len(value) >= 2 and value[0] in ("\"", "'") and value[-1] == value[0]:
+            value = value[0] + "[GİZLİ]" + value[0]  # JSON/YAML tırnaklarını koru
+        elif value.lower().startswith("bearer "):
+            value = "Bearer [GİZLİ]"
+        else:
+            value = "[GİZLİ]"
+        return match.group("prefix") + value
+    return SECRET_RE.sub(mask, text or "")
+
+
+def redact_data(value):
+    """Yapılandırılmış çıktıdaki sır alanlarını özyinelemeli karart; diğer metinleri de tara."""
+    if isinstance(value, dict):
+        return {key: ("[GİZLİ]" if isinstance(key, str) and SECRET_FIELD_RE.fullmatch(key) else redact_data(item))
+                for key, item in value.items()}
+    if isinstance(value, list):
+        return [redact_data(item) for item in value]
+    if isinstance(value, str):
+        return redact(value)
+    return value
+
+
+def write_note(path, text):
+    """Her arka uç için ortak, gizli değerleri karartan not yazma kapısı."""
+    Path(path).write_text(redact((text or "").rstrip("\n") + "\n"), encoding="utf-8")
+
+
+def redact_file(path):
+    """Var olan metin/JSON çıktısını da maskele; JSON yapısını mümkünse koru."""
+    path = Path(path)
+    try:
+        original = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return
+    if path.suffix.lower() == ".json":
+        try:
+            safe = json.dumps(redact_data(json.loads(original)), ensure_ascii=False, indent=2) + "\n"
+        except json.JSONDecodeError:
+            safe = redact(original)
+    else:
+        safe = redact(original)
+    if safe != original:
+        path.write_text(safe, encoding="utf-8")
 
 
 def hata_ozeti(err, out="", rc=None, ad="", sinir=200):
@@ -450,7 +499,7 @@ def work_opencode(prompt_text, note, base, model_key, effort, timeout, search, r
     if not parsed["tamam"]:
         return {"rc": 7, "hata": f"akış nihai cevap (reason=stop) olmadan bitti (adım sınırı/kesinti; son adım nedeni: {parsed['son_neden'] or 'yok'})", "jeton": parsed["jeton"],
                 "araclar": parsed["araclar"], "ayrinti": parsed["ayrinti"], "adimlar": parsed["adimlar"]}
-    note.write_text(parsed["metin"] + "\n", encoding="utf-8")
+    write_note(note, parsed["metin"])
     return {"rc": 0, "jeton": parsed["jeton"], "araclar": parsed["araclar"], "ayrinti": parsed["ayrinti"], "adimlar": parsed["adimlar"]}
 
 
@@ -470,7 +519,7 @@ def work_cli(prompt_text, note, model_key, timeout):
     if rc != 0 or not parsed["metin"]:
         return {"rc": rc or 3, "hata": hata_ozeti(err, out, rc or 3, os.path.basename(cmd[0])) if rc else
                 hata_ozeti(err, out, 0, os.path.basename(cmd[0]) + " (boş yanıt)")}
-    note.write_text(parsed["metin"] + "\n", encoding="utf-8")
+    write_note(note, parsed["metin"])
     return {"rc": 0, "jeton": parsed["jeton"], "araclar": {} if text_mode else {"web_search": parsed["arama"]}}
 
 
@@ -632,7 +681,8 @@ def main():
     template = load_template()
     primary_mcp = args.arka in ("otomatik", "opencode") and args.okuyucu == "mcp"
     for item in plan:
-        (base / "istemler" / f"{item['slug']}.md").write_text(render(item, template, OKUMA_MCP if primary_mcp else OKUMA_GENEL, getattr(args, "hafif", False) is True), encoding="utf-8")
+        prompt = render(item, template, OKUMA_MCP if primary_mcp else OKUMA_GENEL, getattr(args, "hafif", False) is True)
+        (base / "istemler" / f"{item['slug']}.md").write_text(redact(prompt), encoding="utf-8")
     print(f"arastir: {len(plan)} istem yazıldı → {base}/istemler")
     if args.kuru:
         return 0
@@ -673,9 +723,15 @@ def main():
     for item in plan:
         slug, note = item["slug"], base / "notlar" / f"{item['slug']}.md"
         prev = previous.get(slug)
-        if prev and prev.get("ok") and prev.get("hash") == prompt_hash[slug] and note.exists() and \
-                check_contract(note.read_text(encoding="utf-8", errors="replace"),
-                               minimum_urls=item.get("min_url_required", MIN_URLS), expected_questions=len(item["sorular"]))[0]:
+        reusable = bool(prev and prev.get("ok") and prev.get("hash") == prompt_hash[slug] and note.exists())
+        if reusable:
+            raw_note = note.read_text(encoding="utf-8", errors="replace")
+            safe_note = redact(raw_note)
+            if safe_note != raw_note:
+                note.write_text(safe_note, encoding="utf-8")
+            reusable = check_contract(safe_note, minimum_urls=item.get("min_url_required", MIN_URLS),
+                                      expected_questions=len(item["sorular"]))[0]
+        if reusable:
             reused.append({**prev, "devam": True})
         else:
             note.unlink(missing_ok=True)
@@ -692,7 +748,7 @@ def main():
         done = {r["slug"]: r for r in results}
         merged = [done.pop(item["slug"]) for item in plan if item["slug"] in done]
         tmp = base / "calisma.json.tmp"
-        tmp.write_text(json.dumps(merged, ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp.write_text(json.dumps(redact_data(merged), ensure_ascii=False, indent=2), encoding="utf-8")
         os.replace(tmp, base / "calisma.json")
 
     if reused:
@@ -720,7 +776,7 @@ def main():
                     print(f"       ↳ başarısız deneme: {d['arka']} rc={d['rc']} {d['hata']}", flush=True)
     order = {item["slug"]: n for n, item in enumerate(plan)}
     results.sort(key=lambda r: order.get(r["slug"], 0))
-    (base / "calisma.json").write_text(json.dumps(results, ensure_ascii=False, indent=2), encoding="utf-8")
+    (base / "calisma.json").write_text(json.dumps(redact_data(results), ensure_ascii=False, indent=2), encoding="utf-8")
     shutil.rmtree(base / ".oc-calisma", ignore_errors=True)
 
     failed = [r["slug"] for r in results if not r["ok"]]
@@ -742,6 +798,7 @@ def main():
         cmd.append("--link-yok")
     print("\n" + "=" * 60)
     rc = subprocess.run(cmd, check=False).returncode
+    redact_file(base / "denetim.md")
     if rc != 0:
         print(f"arastir: UYARI denetle.py beklenmedik çıkış kodu {rc}; denetim güvenilmez", file=sys.stderr)
         code = max(code, 71)
@@ -751,6 +808,8 @@ def main():
         vcmd += ["--plan", str(plan_path), "--cikti", str(base / "dogrulama.md"), "--onbellek", str(base / "kaynaklar"),
                  "--temiz-yaz", str(base / "notlar-temiz"), "--dosyalar", *good]
         rc = subprocess.run(vcmd, check=False).returncode
+        redact_file(base / "dogrulama.md")
+        redact_file(base / "dogrulama.json")
         if rc != 0:
             print(f"arastir: UYARI dogrula.py çıkış kodu {rc}; otomatik doğrulama YAPILMADI, iddiaları elle doğrulayın", file=sys.stderr)
             code = max(code, 72)
@@ -758,7 +817,7 @@ def main():
         nd = base / "notlar-temiz" if (base / "notlar-temiz").is_dir() else base / "notlar"
         try:
             dres = destek.run(nd, cache_dir=str(base / "kaynaklar"), files=good)
-            (base / "destek.md").write_text(destek.render(dres), encoding="utf-8")
+            (base / "destek.md").write_text(redact(destek.render(dres)), encoding="utf-8")
             dc = destek.summarize(dres)
             strong = destek.strong_count(dres)
             print("\n" + "=" * 60)
@@ -770,7 +829,7 @@ def main():
     if any(it.get("olgular") for it in plan):   # beklenen olgulara göre kapsama (0 jeton): eksikler için ek plan yazılır
         nd = base / "notlar-temiz" if (base / "notlar-temiz").is_dir() else base / "notlar"
         res = kapsama.run(plan, [nd], labels=["bu çalıştırma"], files=good)
-        (base / "kapsama.md").write_text(kapsama.render(res), encoding="utf-8")
+        (base / "kapsama.md").write_text(redact(kapsama.render(res)), encoding="utf-8")
         print("\n" + "=" * 60)
         for slug, r in res.items():
             low = r["kapsanan"] / max(1, r["toplam"]) < kapsama.VARSAYILAN_ESIK
@@ -779,7 +838,7 @@ def main():
                 code = max(code, 73)
         ep = kapsama.eksik_plan(res)
         if ep:
-            (base / "eksik-PLAN.json").write_text(json.dumps(ep, ensure_ascii=False, indent=2), encoding="utf-8")
+            (base / "eksik-PLAN.json").write_text(json.dumps(redact_data(ep), ensure_ascii=False, indent=2), encoding="utf-8")
             print(f"arastir: eksik olgular için ek plan: {base / 'eksik-PLAN.json'} → `arastir.py eksik-PLAN.json -d BASKA_DIZIN --hafif`, sonra "
                   f"`uzlas.py <bu>/notlar-temiz BASKA_DIZIN/notlar-temiz --yaz birlesik/` ile birleştir", flush=True)
     if failed or weak:

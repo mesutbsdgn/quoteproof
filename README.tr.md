@@ -95,6 +95,7 @@ Her bulgu satırında dört öğe bulunur: **iddia**, **birebir alıntı**, **bu
 
 | Betik | Görevi | Maliyet |
 |---|---|---|
+| `ayar.py` | Yapılandırmayı, etkin model ve arka uçları ve anahtarın bulunup bulunmadığını gösterir; anahtar değerini yazdırmaz | 0 jeton |
 | `arastir.py` | Alt ajanları paralel çalıştırır, başarısız olanı yeniden dener, gerekirse başka arka uca geçer, `notlar/<slug>.md` dosyalarını yazar, ardından denetim ve doğrulamayı çalıştırır | ucuz model |
 | `denetle.py` | Notları denetler: biçim, bağlantının çalışıp çalışmadığı, GitHub deposunun var olup olmadığı ve etkinliği, **kaynak güveni**. Elle bakılmaya değer iddiaları seçer | 0 jeton |
 | `dogrula.py` | Her alıntıyı, rakamı, sürümü ve kod parçasını gösterilen sayfada arar, karar verir | 0 jeton |
@@ -354,8 +355,8 @@ Yazarın denemelerinde küçük bir konu, alt ajan başına yaklaşık 30 saniye
 ## Testler
 
 ```bash
-python3 arastir-ogren/scripts/test_arastir.py   # 219 test: ayrıştırma, sözleşme, devam, doğrulama, güven puanı, yapılandırma, MCP sunucusu
-python3 arastir-ogren/scripts/test_oku.py       # 54 test: ayıklama, BM25, önbellek, SSRF, yönlendirme, robots.txt, PDF
+python3 arastir-ogren/scripts/test_arastir.py   # 241 test: ayrıştırma, sözleşme, devam, doğrulama, güven puanı, yapılandırma, MCP sunucusu
+python3 arastir-ogren/scripts/test_oku.py       # 57 test: ayıklama, BM25, önbellek, SSRF, yönlendirme, robots.txt, PDF
 ```
 
 İki set de ağ erişimi olmadan çalışır.
