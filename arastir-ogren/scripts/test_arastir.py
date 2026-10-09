@@ -1519,6 +1519,33 @@ class PlanMinUrl(unittest.TestCase):
             self.assertEqual(arastir.weak_notes(base, results, plan), ["genis"])      # dar: 4 ≥ 3 → zayıf değil; genis: 4 < 8 → zayıf
 
 
+class KalanIddiaUyarisi(unittest.TestCase):
+    """Canlı karşılaştırmada: alıntısı çıkarılan bulgunun iddiası ("24 Mart 2026'da arşivlendi") özette kaldı."""
+    NOTE = ("# k\n## S\n### Özet\nDepo 24 Mart 2026'da arşivlendi ve bakım bitti.\n### Alıntılı bulgular\n"
+            "- Arşiv — \"archived by the owner on Mar 24, 2026 and is now read-only\" — [G](https://g.example/r) (2026-03, birincil)\n"
+            "- Başka — \"a long enough quotation here\" — [H](https://h.example/x)\n### Çıkarımlar\n- Hepsi doğru\n")
+
+    def test_cikarilan_bulgunun_sayisi_ozette_kalirsa_uyarilir(self):
+        rows = [{"karar": "Bulunamadı", "not": "n.md",
+                 "iddia": 'Arşiv — "archived by the owner on Mar 24, 2026 and is now read-only" — [G](https://g.example/r) (2026-03, birincil)'}]
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / "n.md").write_text(self.NOTE, encoding="utf-8")
+            dogrula.clean_copies(d, rows, Path(d) / "temiz")
+            rep = (Path(d) / "temiz" / "DISLANAN.md").read_text(encoding="utf-8")
+            temiz = (Path(d) / "temiz" / "n.md").read_text(encoding="utf-8")
+        self.assertNotIn("archived by the owner", temiz)       # alıntı satırı çıktı
+        self.assertIn("Depo 24 Mart 2026", temiz)              # ama özet cümlesi kaldı
+        self.assertIn("elle gözden geçir: «Depo 24 Mart 2026'da arşivlendi", rep)
+
+    def test_sayisi_olmayan_bulguda_uyari_yok(self):
+        self.assertEqual(dogrula.leftover_mentions('Sürüm notu — "Free-threaded Python is officially supported" — [W](https://w.example)', ["Resmî destek var."]), [])
+        self.assertEqual(dogrula.rare_numbers("2026 yılında 24 Mart %5 ve 1 adet"), {"24", "%5"})
+
+    def test_belge_numarasi_ve_kunye_tarihi_sayilmaz(self):
+        self.assertEqual(dogrula.rare_numbers("[PEP 779]: destek (2025-10, birincil) ve RFC 9309, FIPS 203, CVE-2024-1234"), set())
+        self.assertEqual(dogrula.rare_numbers("PEP 779 ve %15 sınırı"), {"%15"})
+
+
 class DenetlenemediUyarisi(unittest.TestCase):
     """Şemasız adresli rapor ("kubernetes.io/blog/…") 0 sayfa okutuyordu ve "0 hata" diye temiz görünüyordu (9 Ekim 2026, canlı karşılaştırma)."""
     def test_kaynak_urlsi_olmayan_rapor_uyari_alir(self):

@@ -528,6 +528,30 @@ def render(rows, coverage):
     return "\n".join(L) + "\n"
 
 
+def rare_numbers(text):
+    """Sayı/tarih belirteçleri: iki ya da daha çok haneli sayılar (yıllar hariç) ve yüzdeler. Çıkarılan bulgunun "izini" sürmek için."""
+    text = re.sub(r"\b\d{4}-\d{2}(?:-\d{2})?\b", " ", text)                                      # künye tarihi (2025-10) bulgunun parçası değil
+    text = re.sub(r"(?i)\b(?:PEP|RFC|FIPS|CVE|CWE|CAPEC|ISO|IEC|SP|BCP)[\s\-]*\d[\d.\-]*", " ", text)  # belge numarası ölçülen değer değil
+    toks = set(re.findall(r"(?<![\w.])\d{2,}(?:[.,]\d+)?%?|%\d+(?:[.,]\d+)?", text))
+    return {t for t in toks if not re.fullmatch(r"20[12]\d", t)}
+
+
+def leftover_mentions(removed_body, kept_lines):
+    """Çıkarılan bulgunun sayı/tarihlerini taşıyan, kalan (alıntısız) satırlar: iddia Özet/Çıkarımlar'da yaşıyor olabilir.
+    Alıntı bloğu çıkarılır ama aynı iddia özetin içinde kalırsa temiz not çürüğü taşır (canlı karşılaştırmada görüldü)."""
+    nums = rare_numbers(removed_body)
+    if not nums:
+        return []
+    out = []
+    for ln in kept_lines:
+        t = ln.strip()
+        if not t or t.startswith("#") or ("“" in t or '"' in t):   # başlık ve alıntılı bulgu satırları kalan iddia sayılmaz
+            continue
+        if nums & rare_numbers(t):
+            out.append(t)
+    return out
+
+
 def clean_copies(notes_dir, rows, out_dir, files=None):
     """'Bulunamadı' bulguların maddelerini çıkarıp temiz not kopyaları yazar (sentez girdisi). Orijinal notlara dokunmaz.
     Döner: {dosya: çıkarılan madde sayısı}. Çıkarılanlar out_dir/DISLANAN.md'ye yazılır."""
@@ -552,6 +576,9 @@ def clean_copies(notes_dir, rows, out_dir, files=None):
             kept.append(line)
         (out / p.name).write_text("\n".join(kept) + "\n", encoding="utf-8")
         dropped[p.name] = n
+        for body in sorted(drop.get(p.name, ())):
+            for ln in leftover_mentions(body, kept):
+                report.append(f"  - ⚠ çıkarılan bulgudaki sayı/tarih temiz notta başka yerde geçiyor, elle gözden geçir: «{ln[:140]}»")
     (out / "DISLANAN.md").write_text("\n".join(report) + "\n", encoding="utf-8")
     return dropped
 

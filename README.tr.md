@@ -283,7 +283,7 @@ Yazarın denemelerinde küçük bir konu, alt ajan başına yaklaşık 30 saniye
 ## Testler
 
 ```bash
-python3 arastir-ogren/scripts/test_arastir.py   # 171 test: ayrıştırma, sözleşme, devam, doğrulama, güven puanı, yapılandırma, MCP sunucusu
+python3 arastir-ogren/scripts/test_arastir.py   # 174 test: ayrıştırma, sözleşme, devam, doğrulama, güven puanı, yapılandırma, MCP sunucusu
 python3 arastir-ogren/scripts/test_oku.py       # 54 test: ayıklama, BM25, önbellek, SSRF, yönlendirme, robots.txt, PDF
 ```
 
@@ -321,6 +321,7 @@ Depoda henüz etiketli sürüm yok; kayıtlar en yeniden en eskiye, commit sıra
 - Denetim: "eski tarih" bayrağı bulgu başına satır yerine tek özet satırı oldu. Plan alanı `min_url`, zayıf kaynak eşiğini konu başına belirler. `rapor_kontrol.py`, kaynak gösterilen sayfalarda bir belge numarasının (`RFC 9309`, `FIPS 203`, `CVE-…`) geçmemesini artık uyarı saymaz. Araştırma çıktıları (`arastirma/`) git'e girmez. Testler: 165 + 52.
 - Dördüncü canlı denemede bulundu: okuyucu artık Blogger/Google Security Blog makale gövdesini açıyor (gövde `<script type="text/template">` içinde duruyor; yalnız bu dar kalıp açılır). Büyük bir HTML dosyasından çok az metin çıkarsa (20 KB'tan büyük HTML'den 800 karakterden az; çoğunlukla JavaScript ile yüklenen içerik), bulunamayan alıntı *Bulunamadı* yerine nedeniyle birlikte *Erişilemedi* olarak bildirilir. Sayfa metninde kalan satır içi HTML (`<u>…</u>` gibi) eşleştirmede yok sayılır. Sayfa önbelleği sürümü v6 oldu. Testler: 169 + 54.
 - `rapor_kontrol.py`, raporda `http(s)://` ile başlayan hiç kaynak URL'si yoksa artık uyarır (`kubernetes.io/blog/…` gibi şemasız adresler okunmaz). Önceden böyle bir rapor hiçbir şey denetlenmediği hâlde "0 hata · 0 uyarı" diye çıkıyordu. Skill'li ve skill'siz koşuları karşılaştırırken bulundu. Testler: 171 + 54.
+- `--temiz-yaz`, alıntısı sayfada bulunamayan bulguyu çıkarır; ama aynı iddia notun özetinde yaşamaya devam edebilir. `DISLANAN.md` artık, çıkarılan bulguyla aynı sayıyı ya da tarihi taşıyan kalan satırları elle bakılmak üzere listeler (`PEP 779` gibi belge numaraları ve künye tarihleri yok sayılır). Çıkarılan "24 Mart 2026'da arşivlendi" alıntısı bu cümleyi özette bıraktığında bulundu. Testler: 174 + 54.
 
 ### Rapor düzeyinde kaynak kontrolü ([`c88db28`](https://github.com/mesutbsdgn/quoteproof/commit/c88db28), [#4](https://github.com/mesutbsdgn/quoteproof/issues/4))
 
