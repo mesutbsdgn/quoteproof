@@ -233,7 +233,7 @@ Allow: /private/acik/
 Disallow: /dosya.pdf$
 Crawl-delay: 3
 
-User-agent: arastir-ogren-oku
+User-agent: quoteproof-oku
 Disallow: /yalniz-bize-yasak/
 
 User-agent: kotubot
@@ -253,7 +253,7 @@ Disallow: /
         self.assertTrue(self._decide("/private/gizli"))
 
     def test_yildiz_grubu_ozel_grup_yoksa_uygulanir(self):
-        text = self.ROBOTS.replace("User-agent: arastir-ogren-oku", "User-agent: baskabot")
+        text = self.ROBOTS.replace("User-agent: quoteproof-oku", "User-agent: baskabot")
         self.assertFalse(self._decide("/private/gizli", text))
         self.assertTrue(self._decide("/yalniz-bize-yasak/x", text))
 
@@ -265,7 +265,7 @@ Disallow: /
         self.assertTrue(self._decide("/x", tie))
 
     def test_joker_ve_son_capa(self):
-        text = self.ROBOTS.replace("User-agent: arastir-ogren-oku", "User-agent: baskabot")
+        text = self.ROBOTS.replace("User-agent: quoteproof-oku", "User-agent: baskabot")
         self.assertFalse(self._decide("/sayfa?action=edit", text))      # /*?action=
         self.assertFalse(self._decide("/dosya.pdf", text))               # $ sabitler
         self.assertTrue(self._decide("/dosya.pdf.html", text))
@@ -369,13 +369,13 @@ Disallow: /
     def test_kisa_ajan_adi_yildiz_grubunu_gecersiz_kilmaz(self):
         g = oku.parse_robots("User-agent: *\nDisallow: /private\n\nUser-agent: a\nAllow: /\n")
         self.assertFalse(oku.robots_decide(g, "/private")[0])
-        g = oku.parse_robots("User-agent: arastir\nDisallow: /x\n")                 # sözcük sınırında önek: eşleşir
+        g = oku.parse_robots("User-agent: quoteproof\nDisallow: /x\n")                 # sözcük sınırında önek: eşleşir
         self.assertFalse(oku.robots_decide(g, "/x")[0])
-        g = oku.parse_robots("User-agent: arastirma\nDisallow: /x\n")               # önek ama sınır yok: eşleşmez
+        g = oku.parse_robots("User-agent: quoteproofs\nDisallow: /x\n")               # önek ama sınır yok: eşleşmez
         self.assertTrue(oku.robots_decide(g, "/x")[0])
 
     def test_crawl_delay_ardisik_ajan_listesini_bolmez(self):
-        g = oku.parse_robots("User-agent: arastir-ogren-oku\nCrawl-delay: 3\nUser-agent: other\nDisallow: /\n")
+        g = oku.parse_robots("User-agent: quoteproof-oku\nCrawl-delay: 3\nUser-agent: other\nDisallow: /\n")
         self.assertEqual(len(g), 1)
         self.assertFalse(oku.robots_decide(g, "/x")[0])
 

@@ -169,17 +169,17 @@ Okuyucu, denetleyici, doğrulayıcı ve güven puanlayıcı için **model, hesap
 ```bash
 git clone https://github.com/mesutbsdgn/quoteproof.git
 mkdir -p ~/.claude/skills
-ln -s "$PWD/quoteproof/arastir-ogren" ~/.claude/skills/arastir-ogren
+ln -s "$PWD/quoteproof/quoteproof" ~/.claude/skills/quoteproof
 ```
 
-Skill klasörünün adı `arastir-ogren` ("araştır ve öğren"). `SKILL.md`, yazarın kendi iş akışı için Türkçe yazılmıştır; dilediğiniz gibi uyarlayabilirsiniz.
+Skill klasörünün adı `quoteproof/` (17 Eki 2026'ya kadar `arastir-ogren` — "araştır ve öğren" — idi). `SKILL.md`, yazarın kendi iş akışı için Türkçe yazılmıştır; dilediğiniz gibi uyarlayabilirsiniz.
 
 ### Yapılandırma (yalnız araştırma alt ajanları için)
 
 ```bash
 mkdir -p ~/.config/quoteproof
-cp quoteproof/arastir-ogren/quoteproof.example.json ~/.config/quoteproof/config.json   # sonra modellerinizi ve anahtar yerini doldurun
-python3 ~/.claude/skills/arastir-ogren/scripts/ayar.py                                   # durumu yazar (anahtarın kendisini asla)
+cp quoteproof/quoteproof/quoteproof.example.json ~/.config/quoteproof/config.json   # sonra modellerinizi ve anahtar yerini doldurun
+python3 ~/.claude/skills/quoteproof/scripts/ayar.py                                   # durumu yazar (anahtarın kendisini asla)
 ```
 
 Alt ajan anahtarı OpenCode'a aktarılır; GitHub kimlik doğrulamasını `gh` yönetir (Quoteproof GitHub token'ı tutmaz).
@@ -220,7 +220,7 @@ Tek sağlayıcılı kurulumda bunların hiçbiri gerekmez. Birkaçı varsa şu e
 ### Bir araştırma başlatın
 
 ```bash
-S=~/.claude/skills/arastir-ogren/scripts
+S=~/.claude/skills/quoteproof/scripts
 
 # 1) araştırma: alt ajanlar paralel çalışır (yazarın denemelerinde küçük bir konu için yaklaşık 30 sn)
 python3 $S/arastir.py PLAN.json -d arastirmam -j 3 -e dusuk
@@ -266,7 +266,7 @@ Bilerek dar tutulan bir konuya `"min_url": 3` ekleyebilirsiniz (3 ile 30 arasın
 ### Araçları tek başına kullanın
 
 ```bash
-S=arastir-ogren/scripts
+S=quoteproof/scripts
 python3 $S/oku.py https://docs.astral.sh/uv/ --soru "pip uyumluluğu" --token 600   # yalnız kısa, ilgili pasajlar
 python3 $S/oku.py URL --ara "10-100x faster"        # bu ifade ya da rakam sayfada geçiyor mu? (bağlamıyla birlikte)
 python3 $S/oku.py URL --robots                      # robots.txt izin veriyor mu?
@@ -356,8 +356,8 @@ Yazarın denemelerinde küçük bir konu, alt ajan başına yaklaşık 30 saniye
 ## Testler
 
 ```bash
-python3 arastir-ogren/scripts/test_arastir.py   # 241 test: ayrıştırma, sözleşme, devam, doğrulama, güven puanı, yapılandırma, MCP sunucusu
-python3 arastir-ogren/scripts/test_oku.py       # 57 test: ayıklama, BM25, önbellek, SSRF, yönlendirme, robots.txt, PDF
+python3 quoteproof/scripts/test_arastir.py   # 241 test: ayrıştırma, sözleşme, devam, doğrulama, güven puanı, yapılandırma, MCP sunucusu
+python3 quoteproof/scripts/test_oku.py       # 57 test: ayıklama, BM25, önbellek, SSRF, yönlendirme, robots.txt, PDF
 ```
 
 İki set de ağ erişimi olmadan çalışır.
@@ -365,7 +365,7 @@ python3 arastir-ogren/scripts/test_oku.py       # 57 test: ayıklama, BM25, önb
 ## Depo yapısı
 
 ```text
-arastir-ogren/            skill (~/.claude/skills/ altına kopyalayın ya da bağlayın)
+quoteproof/            skill (~/.claude/skills/ altına kopyalayın ya da bağlayın)
 ├── SKILL.md              koordinatör talimatları (Türkçe)
 ├── quoteproof.example.json   yapılandırma şablonu (~/.config/quoteproof/config.json olarak kopyalayın)
 ├── references/           alt ajan istemi, rapor şablonu, tasarımın dayandığı notlar

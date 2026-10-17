@@ -1,6 +1,6 @@
 # Yapay zeka ajanları web'de nasıl gezip okuyor? (GitHub kaynak araştırması, 8 Ekim 2026)
 
-> Bu rapor `arastir-ogren`'in kendisiyle üretildi: 4 paralel LLM çalışanı (183 bulgu, 153 bağlantı), 42 GitHub deposu `gh api` ile doğrulandı,
+> Bu rapor `quoteproof`'in kendisiyle üretildi: 4 paralel LLM çalışanı (183 bulgu, 153 bağlantı), 42 GitHub deposu `gh api` ile doğrulandı,
 > 14 iddia otomatik olarak kaynakta arandı. Doğrulama durumu parantezde: **(D)** = kaynakta birebir bulundu, **(K)** = kısmen, **(—)** = otomatik denenmedi/çalışan notuna dayanıyor.
 
 **Kısa cevap.** Açık kaynak "derin araştırma" ajanlarının neredeyse hepsi aynı iskeleti kullanıyor: planla → paralel topla → boşlukları doldur → atıfla yaz. Farkı yaratan üç şey var:
@@ -38,7 +38,7 @@ Yıldız sayısı aktiflik göstermiyor: `langchain-ai/open_deep_research` (12,7
 Baskın kalıp planlayıcı → paralel araştırmacılar → yazar; üstüne bir **boşluk (gap) döngüsü**. Olgun sistemlerde boşluk ayrı bir durum nesnesi (gaps/frontier) ve bitiş koşuluna bağlı.
 Dinamik varyantlar (WebWeaver, WebThinker) planı ve kanıt toplamayı iç içe yürütüyor ([WebWeaver](https://arxiv.org/html/2509.13312v3)).
 **Durma/bütçe** iki felsefede: maliyet-kısıcı erken durma ve Jina'nın "Beast Mode"u (bütçe bitince yalnız "cevap ver" eylemine izin verip cevabı zorlar, boş el dönmez) ([DeepWiki: node-DeepResearch](https://deepwiki.com/jina-ai/node-DeepResearch/3.1-agent-research-loop), —).
-`arastir-ogren` bu ikisini birleştiriyor: tek boşluk turu + çalışana araç bütçesi ve "bütçe bitince elindekiyle yaz" kuralı.
+`quoteproof` bu ikisini birleştiriyor: tek boşluk turu + çalışana araç bütçesi ve "bütçe bitince elindekiyle yaz" kuralı.
 
 ## Ajanlar web'de üç biçimde geziniyor
 1. **Erişilebilirlik ağacı / anlık görüntü** (Playwright MCP, Stagehand): ucuz, deterministik, `ref=e5` gibi indekslerle eylem; "önce ağaç, gerekirse ekran görüntüsü" fiili varsayılan ([Playwright MCP](https://playwright.dev/mcp/snapshots), —). browser-use saf ağaç değil, DOM + erişilebilirlik + yerleşim birleşimi. Token sayıları sayfaya göre 10 kata kadar değişiyor; satıcı rakamları gösterge sayılmalı.
@@ -64,7 +64,7 @@ Değerlendirmede iki yetenek ayrı ölçülmeli: doğru bilgiyi bulmak ([BrowseC
 Tek başına filtre yetmiyor. Savunma iki eksende: içeriği **veri olarak işaretleme** (spotlighting/datamarking; saldırı başarısını %50'nin üzerinden %2'nin altına indirdiği bildirilmiş, [Microsoft Research](https://www.microsoft.com/en-us/research/publication/defending-against-indirect-prompt-injection-attacks-with-spotlighting/), —)
 ve güvenilmez içerik alındıktan sonra **eylemi kısıtlama** ([Design Patterns](https://arxiv.org/abs/2506.08837), [CaMeL](https://arxiv.org/abs/2503.18813)). Çerçeve olarak "lethal trifecta": özel veri + güvenilmez içerik + dış iletişim bir aradaysa sızıntı mümkün; üçünden birini kaldır ([Simon Willison](https://simonwillison.net/2025/Jun/16/the-lethal-trifecta/), —).
 
-## Bu bulgular `arastir-ogren`'e nasıl yansıdı
+## Bu bulgular `quoteproof`'e nasıl yansıdı
 | Bulgu | Uygulama |
 |---|---|
 | Depo bilgisi bayat/uydurma olabilir | `denetle.py` `gh api` ile depo var mı, ⭐, son push, arşivli/durgun doğrular |

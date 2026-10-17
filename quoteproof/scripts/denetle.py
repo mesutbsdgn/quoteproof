@@ -39,7 +39,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import guven  # noqa: E402
 import oku  # noqa: E402
 
-UA = "arastir-ogren/1.0 (baglanti-kontrolu)"
+UA = "quoteproof/1.0 (baglanti-kontrolu)"
 # Çalışan web aramasını yapamadığını notuna yazmışsa (ör. arama sağlayıcısı kapalı) sonuç yalnız bildiği URL'lere dayanır.
 NO_SEARCH = re.compile(r"ECONNREFUSED|web[_ ]?search[^.\n]{0,60}(kapal|devre dışı|çalışm|erişilem|failed|unavailable)|web aramas[ıi][^.\n]{0,40}(kapal|devre dışı|yapılamad|çalışm)", re.I)
 

@@ -169,17 +169,17 @@ The reader, auditor, verifier and trust scorer need **no model, no account and n
 ```bash
 git clone https://github.com/mesutbsdgn/quoteproof.git
 mkdir -p ~/.claude/skills
-ln -s "$PWD/quoteproof/arastir-ogren" ~/.claude/skills/arastir-ogren
+ln -s "$PWD/quoteproof/quoteproof" ~/.claude/skills/quoteproof
 ```
 
-The skill folder is called `arastir-ogren` ("research and learn" in Turkish). `SKILL.md` is written in Turkish for the author's workflow — adapt it freely.
+The skill folder is `quoteproof/` inside this repository (it was called `arastir-ogren` — "research and learn" in Turkish — before 17 Oct 2026). `SKILL.md` is written in Turkish for the author's workflow — adapt it freely.
 
 ### Configure (only for the research workers)
 
 ```bash
 mkdir -p ~/.config/quoteproof
-cp quoteproof/arastir-ogren/quoteproof.example.json ~/.config/quoteproof/config.json   # then fill in your models and key location
-python3 ~/.claude/skills/arastir-ogren/scripts/ayar.py                                   # prints the status (never the key itself)
+cp quoteproof/quoteproof/quoteproof.example.json ~/.config/quoteproof/config.json   # then fill in your models and key location
+python3 ~/.claude/skills/quoteproof/scripts/ayar.py                                   # prints the status (never the key itself)
 ```
 
 The worker key is passed to OpenCode; GitHub authentication is handled by `gh` (Quoteproof does not hold a GitHub token).
@@ -220,7 +220,7 @@ Nothing here is needed for a single-provider setup. If you do have several, thes
 ### Run a research
 
 ```bash
-S=~/.claude/skills/arastir-ogren/scripts
+S=~/.claude/skills/quoteproof/scripts
 
 # 1) research: workers run in parallel (about 30 s per small topic in the author's runs)
 python3 $S/arastir.py PLAN.json -d my-research -j 3 -e dusuk
@@ -266,7 +266,7 @@ For a deliberately narrow topic add `"min_url": 3` (any whole number from 3 to 3
 ### Use the tools on their own
 
 ```bash
-S=arastir-ogren/scripts
+S=quoteproof/scripts
 python3 $S/oku.py https://docs.astral.sh/uv/ --soru "pip compatibility" --token 600   # short, relevant passages only
 python3 $S/oku.py URL --ara "10-100x faster"        # does this phrase / number appear on the page? (with context)
 python3 $S/oku.py URL --robots                      # does robots.txt allow it?
@@ -350,8 +350,8 @@ In the author's runs, a small topic takes about 30 seconds per worker, and the a
 ## Tests
 
 ```bash
-python3 arastir-ogren/scripts/test_arastir.py   # 241 tests: parsing, contract, resume, verification, trust score, config, MCP server
-python3 arastir-ogren/scripts/test_oku.py       # 57 tests: extraction, BM25, cache, SSRF, redirects, robots.txt, PDF
+python3 quoteproof/scripts/test_arastir.py   # 241 tests: parsing, contract, resume, verification, trust score, config, MCP server
+python3 quoteproof/scripts/test_oku.py       # 57 tests: extraction, BM25, cache, SSRF, redirects, robots.txt, PDF
 ```
 
 Both suites run without network access.
@@ -359,7 +359,7 @@ Both suites run without network access.
 ## Repository layout
 
 ```text
-arastir-ogren/            the skill (copy or symlink into ~/.claude/skills/)
+quoteproof/            the skill (copy or symlink into ~/.claude/skills/)
 ├── SKILL.md              coordinator instructions (Turkish)
 ├── quoteproof.example.json   configuration template (copy to ~/.config/quoteproof/config.json)
 ├── references/           worker prompt, report template, notes behind the design

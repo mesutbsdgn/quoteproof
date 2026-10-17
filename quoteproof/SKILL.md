@@ -1,16 +1,16 @@
 ---
-name: arastir-ogren
+name: quoteproof
 description: Çok kaynaklı, kanıtlı araştırma ve öğrenme raporu. Kullanıcı "araştır", "derinlemesine araştır", "karşılaştır", "trendleri/pazarı/literatürü incele", "araştır ve öğret", "X'i öğrenmek istiyorum" dediğinde veya cevap birden çok kaynak, karşılaştırma ya da doğrulama gerektirdiğinde KENDİLİĞİNDEN kullan. Claude koordinatördür: konuyu alt konulara böler, kaynak aramasını paralel çalışanlara (ucuz LLM çalışanları + web araması) devreder, bağlantı/kaynak denetimini ve alıntı doğrulamasını 0 token'lık betiklerle yapar, kritik iddiaları kendisi doğrular ve Türkçe, kaynaklı, öğretici bir rapor yazar. Tek bir olgu/sürüm/fiyat sorusu için KULLANMA (doğrudan bir web arama aracı yeter); yerel kod/depo incelemesi için KULLANMA.
 ---
 
-# arastir-ogren — araştır ve öğren
+# quoteproof — araştır ve öğren
 
 Amaç: bir konuda **kaynaklı, doğrulanmış ve öğretici** bir rapor üretmek; Claude kotasını korumak.
 Claude **planlar, böler, doğrular, yazar**; hacimli web taraması paralel araştırma çalışanlarındadır (ucuz modeller).
 Çıktı iddiadır: çalışan notları rapora girmeden önce denetlenir ve kritik kısmı Claude tarafından kaynağında açılır.
 
 ```bash
-S=~/.claude/skills/arastir-ogren/scripts
+S=~/.claude/skills/quoteproof/scripts
 python3 $S/arastir.py PLAN.json -d ARASTIRMA_DIZINI [--arka otomatik|opencode|cli] [--model AD] [-e dusuk|orta] [-j 3] [-t 420] [--hafif]
 python3 $S/denetle.py ARASTIRMA_DIZINI/notlar [--link-yok] [--github-yok] [--aday 8] [--dosyalar a.md ..]   # denetim: biçim, bağlantı canlılığı (güvenli HTTP katmanı), GitHub depoları (0 token)
 python3 $S/dogrula.py ARASTIRMA_DIZINI/notlar [--en-cok N] [--temiz-yaz DIZIN] [--dosyalar a.md ..]   # iddia–kaynak OTOMATİK doğrulama; varsayılan TÜM bulgular (0 jeton). --temiz-yaz: 'Bulunamadı' maddeleri çıkarılmış kopyalar = sentez girdisi

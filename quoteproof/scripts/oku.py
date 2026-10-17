@@ -48,7 +48,7 @@ from html.parser import HTMLParser
 
 sys.dont_write_bytecode = True  # skill dizininde __pycache__/.pyc üretme (taranamayan ikili dosya)
 
-UA = "arastir-ogren-oku/1.1 (+ajan; nazik okuma)"
+UA = "quoteproof-oku/1.1 (+ajan; nazik okuma)"
 MAX_BYTES = 2 * 1024 * 1024
 MAX_PDF_BYTES = 10 * 1024 * 1024
 TIMEOUT = 15            # soket zaman aşımı (sn)
@@ -56,7 +56,7 @@ TOTAL_DEADLINE = 30     # tek istek için toplam süre (yavaş akıtan sunucular
 MAX_REDIRECTS = 5
 MIN_INTERVAL = 0.5      # aynı host'a ardışık istekler arası en az süre (nazik gezinme)
 MAX_CRAWL_DELAY = 10    # robots.txt Crawl-delay üst sınırı (sn); daha büyük değer bu sınıra çekilir
-ROBOTS_UA = "arastir-ogren-oku"   # robots.txt grup eşleştirmesinde kullanılan ürün adı (UA dizgisinin ilk parçası)
+ROBOTS_UA = "quoteproof-oku"   # robots.txt grup eşleştirmesinde kullanılan ürün adı (UA dizgisinin ilk parçası)
 ROBOTS_TTL = 3600
 ROBOTS_ERROR_TTL = 120    # robots.txt'ye ulaşılamadıysa (ağ/5xx) kararı kısa süre önbellekte tut, sonra yeniden dene
 ROBOTS_MAX_BYTES = 512 * 1024   # RFC 9309: en az 500 KiB ayrıştırılmalı; fazlası yok sayılır

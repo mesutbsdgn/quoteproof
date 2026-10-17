@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""arastir-ogren çalıştırıcısı: PLAN.json → paralel araştırma çalışanları → notlar/ → denetim.
+"""quoteproof çalıştırıcısı: PLAN.json → paralel araştırma çalışanları → notlar/ → denetim.
 
 Kullanım:
   arastir.py PLAN.json -d ARASTIRMA_DIZINI [--arka otomatik|opencode|cli] [--model AD]
