@@ -38,6 +38,7 @@ import ssl
 import subprocess
 import sys
 import tempfile
+import unicodedata
 import threading
 import time
 import urllib.error
@@ -229,7 +230,7 @@ def fetch(url):
 def parse_robots(text):
     """robots.txt → gruplar [{'agents': [...], 'rules': [(izin, desen)], 'delay': sn|None}]. Yorumlar atılır; boş Disallow = serbest."""
     groups, cur, last_agent, rule_count = [], None, False, 0
-    for raw in text[:ROBOTS_MAX_BYTES].splitlines():
+    for raw in text.lstrip("\ufeff")[:ROBOTS_MAX_BYTES].splitlines():  # BOM ilk anahtarı bozup kuralları yok saymasın
         line = raw.split("#", 1)[0].strip()
         if ":" not in line:
             continue
@@ -424,7 +425,8 @@ class Extractor(HTMLParser):
         a = dict(attrs)
         if "hidden" in a or a.get("aria-hidden") == "true":  # boolean öznitelik değeri None gelir
             return True
-        if "display:none" in (a.get("style") or "").replace(" ", "").lower():
+        stil = (a.get("style") or "").replace(" ", "").lower()
+        if "display:none" in stil or "visibility:hidden" in stil:
             return True
         if not self.use_hints:
             return False
@@ -676,6 +678,7 @@ def select_for_budget(items, order, budget):
 
 def normalize(text):
     # Türkçe büyük İ, lower() ile "i" + birleşik nokta (U+0307) üretir; noktayı atarak büyük/küçük harf duyarsız eşleşmeyi koru.
+    text = unicodedata.normalize("NFC", text)  # NFC/NFD eşdeğer harfler aynı sayılsın
     return re.sub(r"[\s\u00a0]+", " ", re.sub(r"[`*_\"'“”‘’]", "", text)).strip().lower().replace("\u0307", "")
 
 
