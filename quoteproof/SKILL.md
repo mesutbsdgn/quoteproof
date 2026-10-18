@@ -1,6 +1,14 @@
 ---
 name: quoteproof
-description: Çok kaynaklı, kanıtlı araştırma ve öğrenme raporu. Kullanıcı "araştır", "derinlemesine araştır", "karşılaştır", "trendleri/pazarı/literatürü incele", "araştır ve öğret", "X'i öğrenmek istiyorum" dediğinde veya cevap birden çok kaynak, karşılaştırma ya da doğrulama gerektirdiğinde KENDİLİĞİNDEN kullan. Claude koordinatördür: konuyu alt konulara böler, kaynak aramasını paralel çalışanlara (ucuz LLM çalışanları + web araması) devreder, bağlantı/kaynak denetimini ve alıntı doğrulamasını 0 token'lık betiklerle yapar, kritik iddiaları kendisi doğrular ve Türkçe, kaynaklı, öğretici bir rapor yazar. Tek bir olgu/sürüm/fiyat sorusu için KULLANMA (doğrudan bir web arama aracı yeter); yerel kod/depo incelemesi için KULLANMA.
+description: >-
+  Çok kaynaklı, kanıtlı araştırma ve öğrenme raporu. Kullanıcı "araştır", "derinlemesine araştır",
+  "karşılaştır", "trendleri/pazarı/literatürü incele", "araştır ve öğret", "X'i öğrenmek
+  istiyorum" dediğinde veya cevap birden çok kaynak, karşılaştırma ya da doğrulama gerektirdiğinde
+  KENDİLİĞİNDEN kullan. Claude koordinatördür: konuyu alt konulara böler, kaynak aramasını paralel
+  çalışanlara (ucuz LLM çalışanları + web araması) devreder, bağlantı/kaynak denetimini ve alıntı
+  doğrulamasını 0 token'lık betiklerle yapar, kritik iddiaları kendisi doğrular ve Türkçe,
+  kaynaklı, öğretici bir rapor yazar. Tek bir olgu/sürüm/fiyat sorusu için KULLANMA (doğrudan bir
+  web arama aracı yeter); yerel kod/depo incelemesi için KULLANMA.
 ---
 
 # quoteproof — araştır ve öğren
@@ -10,7 +18,7 @@ Claude **planlar, böler, doğrular, yazar**; hacimli web taraması paralel ara�
 Çıktı iddiadır: çalışan notları rapora girmeden önce denetlenir ve kritik kısmı Claude tarafından kaynağında açılır.
 
 ```bash
-S=~/.claude/skills/quoteproof/scripts
+S=~/.agents/skills/quoteproof/scripts
 python3 $S/arastir.py PLAN.json -d ARASTIRMA_DIZINI [--arka otomatik|opencode|cli] [--model AD] [-e dusuk|orta] [-j 3] [-t 420] [--hafif]
 python3 $S/denetle.py ARASTIRMA_DIZINI/notlar [--link-yok] [--github-yok] [--aday 8] [--dosyalar a.md ..]   # denetim: biçim, bağlantı canlılığı (güvenli HTTP katmanı), GitHub depoları (0 token)
 python3 $S/dogrula.py ARASTIRMA_DIZINI/notlar [--en-cok N] [--temiz-yaz DIZIN] [--dosyalar a.md ..]   # iddia–kaynak OTOMATİK doğrulama; varsayılan TÜM bulgular (0 jeton). --temiz-yaz: 'Bulunamadı' maddeleri çıkarılmış kopyalar = sentez girdisi
@@ -117,7 +125,7 @@ birden çok bağımsız varlık/bölge → 5 · büyük küme → 6+ (gruplayara
 9. **Rapor kontrolü (teslimden önce):** `python3 $S/rapor_kontrol.py rapor.md --notlar <dizin>/notlar --onbellek <dizin>/kaynaklar --siki`. Çıkış kodu 1 ise raporu temiz kabul etme; hatalı alıntıyı düzelt/çıkar, okunamayan kaynağı "denetlenemedi" diye açıkça belirt veya uyarının gerekçesini kaynakta elle kapat. Ham model yanıtı da bu kapıdan geçer. Doğrudan alıntıyı özgün dilde tırnakla yaz: `"A 304 response is terminated by the end of the header section"`; çeviri/özet için tırnak kullanma: `RFC'ye göre 304 yanıtı başlık bölümünün sonunda biter [RFC 9110](https://www.rfc-editor.org/rfc/rfc9110.html#section-15.4.5)`. Araç rapor öğelerini (tablo satırı, madde, alıntı bloğu, paragraf) atıf yaptığı sayfalara karşı denetler: **hata** = tırnak içindeki alıntı kendi URL'sinde birebir yok; **uyarı** = sayı kaynakta yok, bağlam şüphesi, notlarda hiç geçmeyen URL ya da okunamayan kaynak; **bilgi** = kaynak satırda gösterilmemiş, zayıf kaynak. Sezgiseldir: temiz çıktı raporun doğru olduğunu değil, yalnız bu hata sınıflarının görülmediğini söyler. (8 Eki: bu araç, notu doğru olan ama raporun tablosunda yanlış özneye yazılmış %43–98 oranını yakalar.)
 10. **Teslim:** `rapor.md` (şablon: `references/rapor-sablonu.md`). Dosya gönderme aracı varsa gönder; kullanıcıya 3–5 cümlelik özet + dosya yolu. Çalışanların yarım kalan/boş döndüğü konuları açıkça belirt. **Raporda araç çıktısı olmayan bir puan/derece (örn. "95/100, A+") uydurma:** kalite ölçütü yalnız `rapor_olc.py` ve `rapor_kontrol.py` çıktılarıdır; kendi icat ettiğin bir ölçekle not verirsen bunu açıkça "kişisel yargı" diye etiketle ve araçların söylemediği şeyi onlara atfetme. Sentezde "Kısmen", "Erişilemedi" ya da "Kanıt yok" bulgular kullanıldıysa bunu raporda ayrıca belirt.
 
-**Çalışan çıktı sözleşmesi (sıkılaştırıldı, 8 Eki 2026):** başarı sayılması için not gerçek `## / ###  Alıntılı bulgular` başlığı + varsayılan en az 3 benzersiz URL taşımalı; dar konu için planda `min_url_required` ile 2'ye indirilebilir. 'Plan Modu etkin, onayınıza sunuyorum' gibi plan/onay metni, hiç arama/okuma aracı çağrılmadan yazılmış not ve başlığı yalnız cümle içinde anan metin REDDEDİLİR (rc=9, zincir sürer). Neden: OpenCode `plan` ajan modu bir çalışanı araştırma yerine onay istemeye itti ve planda 'Alıntılı bulgular' ifadesi geçtiği için eski düz alt dize denetimi onu başarılı saymıştı. Zayıf not uyarısının eşiği `min_url` (yoksa `min_url_required`, yoksa varsayılan 8); eşiğin altı kısmi sonuç/çıkış kodu 73 verir.
+**Çalışan çıktı sözleşmesi (sıkılaştırıldı, 8 Eki 2026):** başarı sayılması için not `## <soru>` başlığı altında gerçek `### Alıntılı bulgular` alt başlığı (ikinci seviye `## Alıntılı bulgular` ayrıştırılmaz) + varsayılan en az 3 benzersiz URL taşımalı; dar konu için planda `min_url_required` ile 2'ye indirilebilir. 'Plan Modu etkin, onayınıza sunuyorum' gibi plan/onay metni, hiç arama/okuma aracı çağrılmadan yazılmış not ve başlığı yalnız cümle içinde anan metin REDDEDİLİR (rc=9, zincir sürer). Neden: OpenCode `plan` ajan modu bir çalışanı araştırma yerine onay istemeye itti ve planda 'Alıntılı bulgular' ifadesi geçtiği için eski düz alt dize denetimi onu başarılı saymıştı. Zayıf not uyarısının eşiği `min_url` (yoksa `min_url_required`, yoksa varsayılan 8); eşiğin altı kısmi sonuç/çıkış kodu 73 verir.
 
 **Çalışan çıktı sözleşmesi:** her olgu/rakam maddesi kaynaktan **orijinal dilde birebir alıntı** (≤25 kelime, tırnak içinde) + URL taşır; böylece `dogrula.py` alıntıyı sayfada deterministik arar. Çevrilmiş/özetlenmiş "alıntı" bulunamaz ve "Kısmen/Bulunamadı" çıkar.
 
