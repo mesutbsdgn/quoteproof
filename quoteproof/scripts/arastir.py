@@ -7,7 +7,7 @@ Kullanım:
 
 Arka uçlar (model/sağlayıcı/anahtar ayrıntıları koda gömülü değildir: quoteproof.json — bkz. ayar.py, quoteproof.example.json):
   opencode  OpenCode ajan çalışma ortamı (plan modu; araç kilidi kapalı-varsayılan: yalnız yerleşik `websearch` + `oku_*` MCP ya da `webfetch`).
-  cli       Yapılandırmada tanımlı komut satırı arka ucu (cli_backend; çıktı "responses-json" ya da düz "text"; istem argümanla ya da stdin'den).
+  cli       Yapılandırmada tanımlı komut satırı arka ucu (cli_backend; çıktı "responses-json", düz "text", "claude-stream-json" ya da "codex-jsonl"; istem argümanla ya da stdin'den).
   otomatik  (varsayılan) önce opencode, başarısızsa cli. Kullanılamayan arka uçlar zincirden çıkarılır.
 
 PLAN.json: [{"slug","konu","amac","sorular":[...],"kaynaklar","kisitlar",
@@ -91,6 +91,8 @@ SECRET_RE = re.compile(
 )
 # Araç çağrısı döngüsünü sınırlar: sınıra gelince OpenCode araçsız nihai cevap yazmaya zorlar (aksi halde sonsuza dek arayabilir).
 STEPS_BY_EFFORT = {"dusuk": 16, "orta": 24, "yuksek": 32}
+# "arama/okuma aracı çağrıldı mı" denetiminde sayılan araç adları (küçük harf önekleri); `toolsearch`, `command_execution`, `file_change` SAYILMAZ.
+ARAMA_ARAC_ONEKLERI = ("websearch", "oku_", "webfetch", "web_search", "mcp_tool_call")
 HAFIF_ADIM = 9      # --hafif kipinde nihai metne daha erken geç; MCP okuyucu ayrıca gerçek çağrı sınırına sahiptir
 # Alt süreçlere (OpenCode ve onun MCP sunucuları) yalnız bu değişkenler geçer; kalan ortam (başka servis anahtarları vb.) sızmaz.
 ENV_ALLOWLIST = ("PATH", "HOME", "USER", "LOGNAME", "SHELL", "TERM", "LANG", "LC_ALL", "LC_CTYPE", "TMPDIR", "TZ", "XDG_CONFIG_HOME",
@@ -496,6 +498,114 @@ def parse_text_output(stdout):
     return {"metin": ANSI_RE.sub("", stdout or "").replace("\r\n", "\n").strip(), "arama": 0, "jeton": [0, 0]}
 
 
+def _sayi(value):
+    """JSON sayı alanını güvenle int'e çevirir (bool/metin/None → 0): sürüm farkı ya da eksik alan ayrıştırmayı düşürmesin."""
+    return int(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else 0
+
+
+def _cli_sonuc(metin="", jeton=None, araclar=None, ayrinti=None, maliyet_usd=None, hata=""):
+    """cli ayrıştırıcılarının ortak dönüş biçimi (opencode alanlarıyla aynı adlar + isteğe bağlı `maliyet_usd`)."""
+    return {"metin": metin, "jeton": jeton if jeton is not None else [0, 0], "araclar": araclar if araclar is not None else {},
+            "ayrinti": ayrinti if ayrinti is not None else {"taze": 0, "onbellek": 0, "cikti": 0}, "maliyet_usd": maliyet_usd, "hata": hata}
+
+
+def parse_claude_stream_json(stdout):
+    """"claude-stream-json" biçimi (`claude -p --output-format stream-json --verbose`): satır başına bir JSON olayı.
+    Nihai cevap SON `result` satırının `result` alanıdır; jeton o satırın `usage`'ından (girdi = input+cache_creation+cache_read),
+    para maliyeti `total_cost_usd`'den gelir. Araç sayısı `assistant` olaylarındaki `tool_use` içeriklerinden sayılır
+    (ad küçük harfe çevrilir; `ToolSearch` gibi yerleşik aramalar araç sayısına yazılır ama arama/okuma denetiminde sayılmaz).
+    Resume edilen oturumda maliyet kümülatiftir; her çalışan yeni oturum olduğundan yalnız son `result` okunur (toplama yapılmaz).
+    Bilinmeyen olay/alanlar sessizce atlanır (gerçek claude koşusuyla doğrulandı)."""
+    araclar, sonuc = {}, None
+    for line in (stdout or "").splitlines():
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            olay = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(olay, dict):
+            continue
+        if olay.get("type") == "assistant":
+            message = olay.get("message") if isinstance(olay.get("message"), dict) else {}
+            for c in message.get("content") or []:
+                if isinstance(c, dict) and c.get("type") == "tool_use" and c.get("name"):
+                    ad = str(c["name"]).lower()
+                    araclar[ad] = araclar.get(ad, 0) + 1
+        elif olay.get("type") == "result":
+            sonuc = olay
+    if sonuc is None:
+        return _cli_sonuc(hata="akışta nihai `result` satırı yok (kesilmiş ya da tanınmayan biçim)")
+    usage = sonuc.get("usage") if isinstance(sonuc.get("usage"), dict) else {}
+    girdi, taze_olusturma = _sayi(usage.get("input_tokens")), _sayi(usage.get("cache_creation_input_tokens"))
+    onbellek, cikti = _sayi(usage.get("cache_read_input_tokens")), _sayi(usage.get("output_tokens"))
+    jeton = [girdi + taze_olusturma + onbellek, cikti]
+    ayrinti = {"taze": girdi + taze_olusturma, "onbellek": onbellek, "cikti": cikti}
+    ham_maliyet = sonuc.get("total_cost_usd")
+    maliyet = float(ham_maliyet) if isinstance(ham_maliyet, (int, float)) and not isinstance(ham_maliyet, bool) else None
+    if sonuc.get("is_error"):
+        return _cli_sonuc(jeton=jeton, araclar=araclar, ayrinti=ayrinti, maliyet_usd=maliyet,
+                          hata=redact(str(sonuc.get("result") or "claude akışı hata bildirdi"))[:200])
+    return _cli_sonuc(metin=str(sonuc.get("result") or "").strip(), jeton=jeton, araclar=araclar,
+                      ayrinti=ayrinti, maliyet_usd=maliyet)
+
+
+CODEX_ARAC_TIPLERI = ("command_execution", "mcp_tool_call", "web_search", "file_change")
+
+
+def parse_codex_jsonl(stdout):
+    """"codex-jsonl" biçimi (`codex exec --json`): JSONL olay akışı (thread.started, item.started/updated/completed, turn.completed, ...).
+    Nihai cevap SON `item.completed` olayının `agent_message` metnidir; jeton `turn.completed.usage`'dan gelir — codex PARASAL MALİYET VERMEZ
+    (`maliyet_usd` None). Araç öğeleri `item.completed` olaylarından `id` ile tekilleştirilerek sayılır. `turn.failed`/`error` → metin boş + hata dolu.
+    Bu biçim GERÇEK codex ile TEST EDİLMEDİ (kota kapalı): davranış codex belgesine dayanır. Bilinmeyen olay/alanlar sessizce atlanır."""
+    metin, hata, gorulen, araclar = "", "", set(), {}
+    usage = {}
+    for line in (stdout or "").splitlines():
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            olay = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(olay, dict):
+            continue
+        tip = olay.get("type")
+        if tip == "item.completed":
+            item = olay.get("item") if isinstance(olay.get("item"), dict) else {}
+            itip = str(item.get("type") or "").lower()
+            if itip == "agent_message" and item.get("text"):
+                metin = str(item["text"]).strip()
+            elif itip in CODEX_ARAC_TIPLERI:
+                anahtar = item.get("id") or f"{itip}:{len(gorulen)}"
+                if anahtar not in gorulen:
+                    gorulen.add(anahtar)
+                    araclar[itip] = araclar.get(itip, 0) + 1
+        elif tip == "turn.completed" and isinstance(olay.get("usage"), dict):
+            usage = olay["usage"]
+        elif tip in ("turn.failed", "error"):
+            for kaynak in (olay.get("error"), olay.get("message")):
+                if isinstance(kaynak, dict) and kaynak.get("message"):
+                    hata = str(kaynak["message"])
+                    break
+                if isinstance(kaynak, str) and kaynak.strip():
+                    hata = kaynak
+                    break
+            else:
+                hata = str(tip)
+    girdi, onbellek = _sayi(usage.get("input_tokens")), _sayi(usage.get("cached_input_tokens"))
+    cikti = _sayi(usage.get("output_tokens"))
+    jeton = [girdi, cikti]
+    ayrinti = {"taze": max(0, girdi - onbellek), "onbellek": onbellek, "cikti": cikti}
+    if hata:
+        return _cli_sonuc(jeton=jeton, araclar=araclar, ayrinti=ayrinti, hata=redact(hata)[:200])
+    if not metin:
+        return _cli_sonuc(jeton=jeton, araclar=araclar, ayrinti=ayrinti,
+                          hata="akışta nihai `agent_message` yok (kesilmiş ya da tanınmayan biçim)")
+    return _cli_sonuc(metin=metin, jeton=jeton, araclar=araclar, ayrinti=ayrinti)
+
+
 _oc_v2 = None
 
 
@@ -583,7 +693,16 @@ def work_cli(prompt_text, note, model_key, timeout):
     rc, out, err, timed_out = run_cmd(cmd, env=clean_env(), timeout=timeout + 60, stdin_text=prompt_text if via_stdin else None)
     if timed_out:
         return {"rc": 6, "hata": "cli zaman aşımı"}
-    text_mode = ayar.cli_format() == "text"
+    fmt = ayar.cli_format()
+    if fmt in ("claude-stream-json", "codex-jsonl"):   # jeton/araç/maliyet ölçülebilen yeni biçimler (text/responses-json yolu aynen kalır)
+        parsed = parse_claude_stream_json(out) if fmt == "claude-stream-json" else parse_codex_jsonl(out)
+        if rc != 0 or parsed["hata"] or not parsed["metin"]:
+            why = parsed["hata"] or hata_ozeti(err, out, rc or 0, os.path.basename(cmd[0]) + " (boş yanıt)")
+            return {"rc": rc or 3, "hata": redact(why)[:200]}
+        write_note(note, parsed["metin"])
+        return {"rc": 0, "jeton": parsed["jeton"], "araclar": parsed["araclar"],
+                "ayrinti": parsed["ayrinti"], "maliyet_usd": parsed["maliyet_usd"]}
+    text_mode = fmt == "text"
     parsed = parse_text_output(out) if text_mode else parse_responses_json(out)
     if rc != 0 or not parsed["metin"]:
         return {"rc": rc or 3, "hata": hata_ozeti(err, out, rc or 3, os.path.basename(cmd[0])) if rc else
@@ -632,7 +751,7 @@ def run_worker(item, base, args, start_delay=0.0, sequence=None):
     template = load_template()
     sequence = sequence if sequence is not None else SEQUENCES[args.arka]
     result = {"slug": slug, "ok": False, "deneme": 0, "arka": None, "rc": None, "hata": "", "bayt": 0, "sure_sn": 0, "denemeler": [],
-              "jeton": [0, 0], "araclar": {}, "ek_bolum_atildi": 0}
+              "jeton": [0, 0], "araclar": {}, "maliyet_usd": None, "ek_bolum_atildi": 0}
     started = time.time()
     budget = args.sure * 2.5 + 120   # çalışan başına toplam duvar saati tavanı: zincir sonsuza dek uzamasın
     index = 0
@@ -660,6 +779,8 @@ def run_worker(item, base, args, start_delay=0.0, sequence=None):
             result["jeton"][k] += (r.get("jeton") or [0, 0])[k]
         for name, n in (r.get("araclar") or {}).items():
             result["araclar"][name] = result["araclar"].get(name, 0) + n
+        if r.get("maliyet_usd") is not None:   # yalnız maliyet bildiren arka uçlar (claude-stream-json) toplama katılır
+            result["maliyet_usd"] = (result["maliyet_usd"] or 0.0) + r["maliyet_usd"]
         text = note.read_text(encoding="utf-8", errors="replace") if note.exists() else ""
         if r["rc"] == 0:   # sondaki fazladan '##' bölümü notu düşürmek yerine kes (çalışanı baştan koşturmayalım)
             kesik, atilan = fazla_bolumleri_kes(text, len(item["sorular"]))
@@ -672,8 +793,10 @@ def run_worker(item, base, args, start_delay=0.0, sequence=None):
         ok_contract, why = check_contract(text, minimum_urls=item.get("min_url_required", MIN_URLS),
                                           expected_questions=len(item["sorular"])) if r["rc"] == 0 else (False, "")
         tools_used = r.get("araclar")
-        if ok_contract and backend == "opencode" and isinstance(tools_used, dict) and \
-                not any(k.startswith(("websearch", "oku_", "webfetch")) for k in tools_used):
+        # opencode'da araç listesi her zaman ölçülür; cli'de yalnız araç sayısı ayrıştırılabilen yeni biçimlerde (text/responses-json eski davranışta kalır).
+        arac_olculebilir = backend == "opencode" or (backend == "cli" and ayar.cli_format() in ("claude-stream-json", "codex-jsonl"))
+        if ok_contract and arac_olculebilir and isinstance(tools_used, dict) and \
+                not any(k.startswith(ARAMA_ARAC_ONEKLERI) for k in tools_used):
             ok_contract, why = False, "hiç arama/okuma aracı çağrılmadı (not modelin ezberinden yazıldı, araştırma sayılmaz)"
         if r["rc"] == 0 and not ok_contract:
             neden = sinir_nedeni(text[:6000])
@@ -689,7 +812,8 @@ def run_worker(item, base, args, start_delay=0.0, sequence=None):
             note.replace(bad / f"{slug}.deneme{result['deneme']}.md")
         result["denemeler"].append({"arka": backend, "rc": r["rc"], "hata": r.get("hata", ""), "bayt": size,
                                     "jeton": r.get("jeton") or [0, 0], "araclar": r.get("araclar") or {},
-                                    "ayrinti": r.get("ayrinti"), "adimlar": r.get("adimlar") or []})   # deneme başına maliyet/teşhis
+                                    "ayrinti": r.get("ayrinti"), "maliyet_usd": r.get("maliyet_usd"),
+                                    "adimlar": r.get("adimlar") or []})   # deneme başına maliyet/teşhis
         if r["rc"] == 0:
             result["ok"] = True
             break

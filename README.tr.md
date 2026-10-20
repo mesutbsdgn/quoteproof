@@ -187,7 +187,7 @@ Alt ajan anahtarı OpenCode'a aktarılır; GitHub kimlik doğrulamasını `gh` y
 
 Dosyada şunlar tanımlanır: modelleriniz, anahtarı tutan ortam değişkeninin *adı* (isteğe bağlı olarak anahtar dosyaları) ve isteğe bağlı bir komut satırı arka ucu şablonu.
 
-- Komut JSON ya da düz metin basabilir. `"format": "text"` ayarında standart çıktının tamamı not sayılır; böylece hemen her ajan CLI'ı alt ajan olarak kullanılabilir.
+- Komut JSON ya da düz metin basabilir. `"format"` şunlardan biri olabilir: `responses-json` (`output[]` içeren JSON), `text` (standart çıktının tamamı nottur; böylece hemen her ajan CLI'ı alt ajan olarak kullanılabilir), `claude-stream-json` (`claude -p --output-format stream-json --verbose`; nihai metin ve jeton/maliyet/araç sayısı son `result` satırından ölçülür) ve `codex-jsonl` (`codex exec --json`; nihai metin son `agent_message`, jeton `turn.completed.usage`'dan — codex parasal maliyet vermez).
 - `"prompt_via": "stdin"` ayarında istem, komut satırı yerine standart girdiden verilir. Bu seçenek, stdin okuyan CLI'lar ve çok uzun istemler için uygundur.
 - Özel CLI'a yapılandırılmış anahtar aktarılmaz; CLI yalnızca izin verilen ortam değişkenlerini alır ve kendi oturumunu ya da yapılandırmasını kullanmalıdır. Bu arka uç için güvenlik sınırları [Sınırlar](#sınırlar) bölümündedir.
 - Dosya sırasıyla `QUOTEPROOF_CONFIG` ortam değişkeninde, skill klasöründeki `quoteproof.json` dosyasında ve `~/.config/quoteproof/config.json` yolunda aranır. Dosya git'e girmez.
@@ -207,7 +207,7 @@ Quoteproof belli bir sağlayıcıyı ya da bir ajan filosunu varsaymaz. Tek bir 
 
 Bilmeniz gerekenler:
 - **Web araması alt ajanın parçasıdır.** Alt ajanın bir arama aracı olmalı. `claude -p` ile bu `WebSearch`/`WebFetch`, OpenCode ile yerleşik arama olur. Arama aracı olmayan bir model (örneğin düz bir Ollama modeli) alt ajan olamaz; yalnız aşağıdaki isteğe bağlı hakem olarak kullanılır.
-- **`"format": "text"` aramanın yapıldığını kanıtlayamaz.** Çıktı sözleşmesi yine not yapısını ve en az üç ayrı URL'yi şart koşar, doğrulayıcı da her alıntıyı sayfasında arar; ama bakılacak bir araç günlüğü yoktur.
+- **`"format": "text"` aramanın yapıldığını kanıtlayamaz.** Çıktı sözleşmesi yine not yapısını ve en az üç ayrı URL'yi şart koşar, doğrulayıcı da her alıntıyı sayfasında arar; ama bakılacak bir araç günlüğü yoktur. `claude-stream-json` ve `codex-jsonl` biçimlerinde araç sayısı da ölçülür ve hiç arama/okuma aracı çağrılmadıysa not reddedilir.
 - **Tek sağlayıcı tam desteklenir.** Varsayılan zincir önce OpenCode'u, sonra komut satırı arka ucunu dener; yalnız biri tanımlıysa yalnız o kullanılır (`python3 scripts/ayar.py` neyin kullanılabildiğini gösterir).
 
 ### İsteğe bağlı: birden çok ajan kullanıyorsanız

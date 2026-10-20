@@ -1424,6 +1424,164 @@ class CliIstemStdin(unittest.TestCase):
             self.assertEqual(note.read_text(encoding="utf-8").strip(), "GOT:merhaba istem")
 
 
+class CliYeniBicimler(unittest.TestCase):
+    """cli_backend.format = "claude-stream-json" | "codex-jsonl": jeton, araç sayısı ve maliyet ölçümü.
+    Fixture satırları gerçek claude stream-json koşusundan küçültülerek buraya GÖMÜLMÜŞTÜR (test dosyaya bağımlı değildir)."""
+
+    CLAUDE = [
+        '{"type":"assistant","message":{"content":[{"type":"thinking","thinking":""}],"usage":{"input_tokens":2,"cache_creation_input_tokens":39977,"cache_read_input_tokens":22261,"output_tokens":6}}}',
+        '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"ToolSearch","input":{"query":"select:WebFetch"}}]}}',
+        '{"type":"user","message":{"content":"(araç sonucu)"}}',
+        '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t2","name":"WebFetch","input":{"url":"https://example.com"}}]}}',
+        '{"type":"assistant","message":{"content":[{"type":"text","text":"Sayfanın başlığı \\"Example Domain\\"."}]}}',
+        '{"type":"result","subtype":"success","is_error":false,"result":"Sayfanın başlığı \\"Example Domain\\".","num_turns":3,"duration_ms":7569,"total_cost_usd":0.0097969,'
+        '"usage":{"input_tokens":6,"cache_creation_input_tokens":40793,"cache_read_input_tokens":147410,"output_tokens":264}}',
+    ]
+
+    # Codex `--json` belgesinden alınan örnek olaylar. NOT: bu biçim gerçek codex ile TEST EDİLMEDİ (kota kapalı).
+    CODEX = [
+        '{"type":"thread.started","thread_id":"t"}',
+        '{"type":"turn.started"}',
+        '{"type":"item.completed","item":{"id":"c1","type":"command_execution"}}',
+        '{"type":"item.completed","item":{"id":"w1","type":"web_search"}}',
+        '{"type":"item.completed","item":{"id":"a1","type":"agent_message","text":"Nihai cevap"}}',
+        '{"type":"turn.completed","usage":{"input_tokens":24763,"cached_input_tokens":24448,"output_tokens":122,"reasoning_output_tokens":0}}',
+    ]
+
+    def tearDown(self):
+        ayar.reset()
+
+    def test_claude_stream_jeton_arac_maliyet_ve_metin(self):
+        r = arastir.parse_claude_stream_json("\n".join(self.CLAUDE))
+        self.assertEqual(r["metin"], 'Sayfanın başlığı "Example Domain".')
+        self.assertEqual(r["araclar"], {"toolsearch": 1, "webfetch": 1})
+        self.assertEqual(r["jeton"], [188209, 264])                     # girdi = 6 + 40793 + 147410; çıktı = 264
+        self.assertEqual(r["ayrinti"], {"taze": 40799, "onbellek": 147410, "cikti": 264})
+        self.assertEqual(r["maliyet_usd"], 0.0097969)
+        self.assertEqual(r["hata"], "")
+
+    def test_claude_stream_is_error_metinsiz_hata_doner(self):
+        hatali = self.CLAUDE[:-1] + ['{"type":"result","subtype":"error_during_execution","is_error":true,"result":"API hatası","usage":{"input_tokens":1,"output_tokens":0}}']
+        r = arastir.parse_claude_stream_json("\n".join(hatali))
+        self.assertEqual(r["metin"], "")
+        self.assertIn("API hatası", r["hata"])
+
+    def test_claude_stream_bozuk_ve_bos_satirlar_atlanir(self):
+        r = arastir.parse_claude_stream_json("\n".join(["", "gürültü", "{bozuk json", "[1,2]"] + self.CLAUDE))
+        self.assertEqual(r["jeton"], [188209, 264])
+        self.assertEqual(r["araclar"], {"toolsearch": 1, "webfetch": 1})
+
+    def test_claude_stream_result_yoksa_hata(self):
+        self.assertIn("result", arastir.parse_claude_stream_json("\n".join(self.CLAUDE[:-1]))["hata"])
+        self.assertIn("result", arastir.parse_claude_stream_json("")["hata"])
+
+    def test_codex_belge_ornegi_usage_ve_agent_message(self):
+        r = arastir.parse_codex_jsonl("\n".join(self.CODEX))
+        self.assertEqual(r["metin"], "Nihai cevap")
+        self.assertEqual(r["jeton"], [24763, 122])
+        self.assertEqual(r["ayrinti"], {"taze": 315, "onbellek": 24448, "cikti": 122})   # taze = input - cached
+        self.assertEqual(r["araclar"], {"command_execution": 1, "web_search": 1})
+        self.assertIsNone(r["maliyet_usd"])                             # codex parasal maliyet vermez
+        self.assertEqual(r["hata"], "")
+
+    def test_codex_arac_ogeleri_id_ile_tekillestirilir(self):
+        akis = self.CODEX[:4] + ['{"type":"item.updated","item":{"id":"w1","type":"web_search","status":"in_progress"}}',
+                                 '{"type":"item.completed","item":{"id":"w1","type":"web_search"}}'] + self.CODEX[5:]
+        r = arastir.parse_codex_jsonl("\n".join(akis))
+        self.assertEqual(r["araclar"], {"command_execution": 1, "web_search": 1})       # aynı id iki kez sayılmaz
+
+    def test_codex_turn_failed_hata_doner(self):
+        r = arastir.parse_codex_jsonl("\n".join(self.CODEX[:2] + ['{"type":"turn.failed","error":{"message":"kota doldu"}}']))
+        self.assertEqual(r["metin"], "")
+        self.assertIn("kota doldu", r["hata"])
+
+    def test_codex_agent_message_yoksa_hata(self):
+        r = arastir.parse_codex_jsonl(self.CODEX[0])
+        self.assertEqual(r["metin"], "")
+        self.assertIn("agent_message", r["hata"])
+
+    def _cfg(self, fmt):
+        d = tempfile.mkdtemp()
+        p = Path(d) / "c.json"
+        cli = {"command": ["agent-cli", "--model", "{model}", "{prompt}"], "format": fmt}
+        p.write_text(json.dumps({"models": {"m": {"cli": "m-id"}}, "api_key_env": None, "cli_backend": cli}), encoding="utf-8")
+        return mock.patch.dict(os.environ, {"QUOTEPROOF_CONFIG": str(p)})
+
+    def _work(self, fmt, stdout, rc=0):
+        with self._cfg(fmt), mock.patch.object(arastir, "run_cmd", return_value=(rc, stdout, "", False)), \
+             mock.patch.object(arastir.shutil, "which", return_value="/bin/agent-cli"), tempfile.TemporaryDirectory() as d:
+            ayar.reset()
+            note = Path(d) / "n.md"
+            r = arastir.work_cli("P", note, "m", 30)
+            return r, (note.read_text(encoding="utf-8") if note.exists() else None)
+
+    def test_work_cli_claude_stream_jeton_arac_maliyet_dondurur(self):
+        sonuc = ('{"type":"result","subtype":"success","is_error":false,"result":' + json.dumps(GOOD_NOTE)
+                 + ',"total_cost_usd":0.02,"usage":{"input_tokens":6,"cache_creation_input_tokens":40793,"cache_read_input_tokens":147410,"output_tokens":264}}')
+        r, written = self._work("claude-stream-json", "\n".join(self.CLAUDE[:-1] + [sonuc]))
+        self.assertEqual(r["rc"], 0)
+        self.assertEqual(r["jeton"], [188209, 264])
+        self.assertEqual(r["araclar"], {"toolsearch": 1, "webfetch": 1})
+        self.assertEqual(r["maliyet_usd"], 0.02)
+        self.assertTrue(arastir.check_contract(written)[0])            # stream-json'dan gelen not sözleşmeyi de geçer
+
+    def test_work_cli_claude_stream_is_error_basarisiz(self):
+        r, written = self._work("claude-stream-json", '{"type":"result","is_error":true,"result":"hata","usage":{}}')
+        self.assertNotEqual(r["rc"], 0)
+        self.assertIsNone(written)
+
+    def _kos(self, fmt, araclar):
+        def fake_cli(prompt_text, note, *a, **k):
+            note.write_text(GOOD_NOTE)
+            return {"rc": 0, "araclar": araclar, "jeton": [10, 5]}
+        with mock.patch.object(arastir, "work_cli", side_effect=fake_cli), \
+             mock.patch.object(arastir.ayar, "cli_format", return_value=fmt), \
+             mock.patch.object(arastir.time, "sleep"), tempfile.TemporaryDirectory() as d:
+            base = Path(d); (base / "istemler").mkdir(); (base / "notlar").mkdir()
+            args = mock.Mock(arka="cli", sure=60, model="fast", efor="dusuk", arama_yok=False, okuyucu="mcp")
+            return arastir.run_worker({"slug": "a", "konu": "k", "sorular": ["s?"]}, base, args, 0, ["cli"])
+
+    def test_cli_stream_arama_araci_yoksa_not_reddedilir(self):
+        res = self._kos("claude-stream-json", {"toolsearch": 1})        # yalnız yerleşik arama: sayılmaz
+        self.assertFalse(res["ok"])
+        self.assertEqual(res["rc"], 9)
+        self.assertIn("arama/okuma", res["hata"])
+
+    def test_cli_stream_webfetch_varsa_gecer(self):
+        self.assertTrue(self._kos("claude-stream-json", {"webfetch": 1})["ok"])
+
+    def test_cli_text_biciminde_arac_kontrolu_tetiklenmez(self):
+        self.assertTrue(self._kos("text", {})["ok"])                    # düz metinde araç bilgisi yok; kontrol uygulanmaz
+
+
+class AyarCliBicimleri(unittest.TestCase):
+    """ayar doğrulaması: yeni cli biçimleri kabul, bilinmeyeni ret."""
+
+    def tearDown(self):
+        ayar.reset()
+
+    def _cfg(self, fmt):
+        d = tempfile.mkdtemp()
+        p = Path(d) / "c.json"
+        cli = {"command": ["c", "{prompt}"]}
+        if fmt is not None:
+            cli["format"] = fmt
+        p.write_text(json.dumps({"models": {"m": {"cli": "m-id"}}, "api_key_env": None, "cli_backend": cli}), encoding="utf-8")
+        return mock.patch.dict(os.environ, {"QUOTEPROOF_CONFIG": str(p)})
+
+    def test_yeni_bicimler_kabul_edilir_bilinmeyen_reddedilir(self):
+        for fmt, beklenen in (("responses-json", "responses-json"), (None, "responses-json"),
+                              ("text", "text"), ("claude-stream-json", "claude-stream-json"), ("codex-jsonl", "codex-jsonl")):
+            with self._cfg(fmt):
+                ayar.reset()
+                self.assertEqual(ayar.cli_format(), beklenen)
+        for bad in ("stream-json", "jsonl", "xml"):
+            with self._cfg(bad):
+                ayar.reset()
+                with self.assertRaises(ayar.ConfigError, msg=bad):
+                    ayar.load()
+
+
 class PdfSatirSonuTireleme(unittest.TestCase):
     def test_satir_sonunda_bolunmus_sozcukler_iki_bicimde_de_bulunur(self):
         page = "attackers trick the victim to perform a drag-\nand-drop action and move the tar-\nget element over the de-\ncoy button now"

@@ -12,8 +12,10 @@ Arama sırası (ilk bulunan kazanır):
   api_key_env    çalışan ortamına verilecek anahtar değişkeninin ADI (null → anahtar gerekmez)
   key_files      `DEĞİŞKEN=değer` biçiminde anahtar dosyaları (ortamda yoksa buralara bakılır)
   runtime_env    çalışma ortamının yerleşik arama aracını açan ek ortam değişkenleri (ör. {"AD": "1"})
-  cli_backend    {"command": [... "{model}" "{prompt}" "{timeout}" ...], "format": "responses-json" | "text"}  — isteğe bağlı komut satırı arka ucu
+  cli_backend    {"command": [... "{model}" "{prompt}" "{timeout}" ...], "format": "responses-json" | "text" | "claude-stream-json" | "codex-jsonl"}  — isteğe bağlı komut satırı arka ucu
                  responses-json: çıktı output[] (web_search_call / message) taşıyan JSON · text: standart çıktının TAMAMI nottur (ANSI renkleri atılır)
+                 claude-stream-json: `claude -p --output-format stream-json --verbose` satır başına JSON olayı; nihai metin ve jeton/maliyet/araç sayısı son `result` satırından
+                 codex-jsonl: `codex exec --json` JSONL akışı; nihai metin son `agent_message`, jeton `turn.completed.usage`'dan (parasal maliyet yok)
                  prompt_via: "arg" (varsayılan; istem komutta {prompt} yerine konur) | "stdin" (istem komutun standart girdisine yazılır; komutta {prompt} OLMAMALI)
 
   judge_backend  (İSTEĞE BAĞLI, hakem.py için) cli_backend ile AYNI şema; ek olarak "model": komuttaki {model} değeri. Tanımsızsa hakem.py çalışmaz.
@@ -31,7 +33,7 @@ sys.dont_write_bytecode = True  # skill dizininde __pycache__/.pyc üretme
 
 HERE = Path(__file__).resolve().parent
 SEARCH_PATHS = (HERE.parent / "quoteproof.json", Path.home() / ".config/quoteproof/config.json")
-CLI_FORMATS = ("responses-json", "text")
+CLI_FORMATS = ("responses-json", "text", "claude-stream-json", "codex-jsonl")
 CLI_PROMPT_VIA = ("arg", "stdin")
 DEFAULTS = {"models": {}, "default_model": None, "api_key_env": "LLM_API_KEY", "key_files": [], "runtime_env": {}, "cli_backend": None, "judge_backend": None}
 _cache = {}

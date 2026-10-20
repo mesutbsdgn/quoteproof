@@ -187,7 +187,7 @@ The worker key is passed to OpenCode; GitHub authentication is handled by `gh` (
 
 The file names your models, the *name* of the environment variable that holds your key (and optional key files), and, optionally, a command-line back-end template.
 
-- The command may print JSON or plain text. With `"format": "text"` its whole output is the note, so almost any agent CLI can act as a worker.
+- The command may print JSON or plain text. `"format"` may be `responses-json` (JSON with an `output[]`), `text` (the whole output is the note, so almost any agent CLI can act as a worker), `claude-stream-json` (`claude -p --output-format stream-json --verbose`; the note and the token/cost/tool counts are read from the last `result` line) or `codex-jsonl` (`codex exec --json`; the note is the last `agent_message`, tokens come from `turn.completed.usage` — codex reports no monetary cost).
 - With `"prompt_via": "stdin"` the prompt is piped to the command's standard input instead of the command line, which suits CLIs that read stdin and very long prompts.
 - The configured key is not passed to a custom CLI. The CLI receives only allow-listed environment variables and must use its own session or configuration. Its security limits are listed under [Limitations](#limitations).
 - The file is looked up in `QUOTEPROOF_CONFIG`, then `quoteproof.json` in the skill folder, then `~/.config/quoteproof/config.json`. It is git-ignored.
@@ -207,7 +207,7 @@ Quoteproof does not assume any particular provider or a fleet of agents. One mod
 
 Things to know:
 - **Web search is part of the worker.** The worker needs a search tool. With `claude -p` it is `WebSearch`/`WebFetch`; with OpenCode it is its built-in search. A model without a search tool cannot be a worker (a plain Ollama model, for example); use it only as the optional referee below.
-- **`"format": "text"` cannot prove that a search happened.** The output contract still requires the note structure and at least three distinct URLs, and the verifier then checks every quote against its page, but there is no tool log to inspect.
+- **`"format": "text"` cannot prove that a search happened.** The output contract still requires the note structure and at least three distinct URLs, and the verifier then checks every quote against its page, but there is no tool log to inspect. With `claude-stream-json` and `codex-jsonl` the tool counts are measured too, and a note is rejected if no search/read tool was called.
 - **One provider is fully supported.** The default chain tries OpenCode first and the command-line back-end second; if only one is configured, only that one is used (`python3 scripts/ayar.py` shows what is available).
 
 ### Optional: if you use more than one agent
