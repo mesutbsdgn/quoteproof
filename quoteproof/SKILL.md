@@ -23,6 +23,7 @@ python3 $S/arastir.py PLAN.json -d ARASTIRMA_DIZINI [--arka otomatik|opencode|cl
 python3 $S/denetle.py ARASTIRMA_DIZINI/notlar [--link-yok] [--github-yok] [--aday 8] [--dosyalar a.md ..]   # denetim: biçim, bağlantı canlılığı (güvenli HTTP katmanı), GitHub depoları (0 token)
 python3 $S/dogrula.py ARASTIRMA_DIZINI/notlar [--en-cok N] [--temiz-yaz DIZIN] [--dosyalar a.md ..]   # iddia–kaynak OTOMATİK doğrulama; varsayılan TÜM bulgular (0 jeton). --temiz-yaz: 'Bulunamadı' maddeleri çıkarılmış kopyalar = sentez girdisi
 python3 $S/destek.py ARASTIRMA_DIZINI/notlar-temiz [--siki]   # Özet/Çıkarımlar cümlelerindeki sayı/tarih/tanımlayıcı alıntıda ya da atıf sayfalarında var mı (0 jeton; arastir.py kendisi çalıştırır, destek.md yazar)
+python3 $S/anlam.py ARASTIRMA_DIZINI [--isaretle] [--kuru]   # İSTEĞE BAĞLI NLI anlam denetimi (ayrı venv; varsayılan kapalı): anlam.md + anlam.json yazar, --isaretle notlar-temiz'i işaretler
 python3 $S/rapor_olc.py RAPOR1.md [RAPOR2.md ..] [--ulkeler "A,B"]   # raporları aynı ölçütlerle say (sözcük, başlık uyumu, URL ve kaynak sınıfı, boşluk ifadesi, KESİK çıktı, ülke kapsamı); 0 jeton
 python3 $S/rapor_kontrol.py rapor.md --notlar DIZIN/notlar --onbellek DIZIN/kaynaklar --siki   # NİHAİ RAPORU teslimden önce denetle; hata/uyarı varsa düzelt veya denetlenemedi diye açıkça bildir; 0 jeton
 python3 $S/oku.py URL --soru "..." [--token 900]        # tek sayfayı KISA oku (ana içerik + BM25 pasajlar; tam sayfadan ~20-40x az jeton)
@@ -130,6 +131,20 @@ birden çok bağımsız varlık/bölge → 5 · büyük küme → 6+ (gruplayara
 
 **Çalışan çıktı sözleşmesi:** her olgu/rakam maddesi kaynaktan **orijinal dilde birebir alıntı** (≤25 kelime, tırnak içinde) + URL taşır; böylece `dogrula.py` alıntıyı sayfada deterministik arar. Çevrilmiş/özetlenmiş "alıntı" bulunamaz ve "Kısmen/Bulunamadı" çıkar.
 
+## Anlam denetimi (isteğe bağlı, NLI)
+
+`dogrula.py` alıntının sayfada GEÇTİĞİNİ söyler; alıntı doğru olsa da iddia onu yanlış öznenin üstüne yapıştırmış olabilir. `anlam.py` bu soruyu çok dilli bir NLI modeline sorar: (öncül = sayfada alıntının ±`pencere` karakter çevresi, hipotez = bulgunun iddia metni) → entailment/neutral/contradiction. entailment eşiğin altındaysa bulgu **işaretlenir** ve sıralanır. **Karar "Doğrulandı" DEĞİŞMEZ**; bu GÜRÜLTÜLÜ bir "önce şuna bak" sinyalidir, KANIT DEĞİLDİR. Hat bağımlılıksız kalır: model AYRI bir sanal ortamda (`torch` + `transformers`) alt süreç olarak çalışır. Varsayılan KAPALI.
+
+Ölçülen davranış (198 gerçek doğrulanmış bulgu; öncül = sayfada alıntının ±300 karakter çevresi, hipotez = iddia): entailment < 0,05 → gerçek çiftlerde %11 yanlış alarm, karıştırılmış çiftlerin %36'sı yakalanır; < 0,10 → %13 / %46; < 0,30 → %22 / %68. Öncül yalnızca alıntı olunca yanlış alarm %26'ya çıkar (tarih/sürüm ayrıntısı alıntı dışında kalır). Yalnız `Doğrulandı` satırları denenir; çeviri/kısa etiket iddialarında ve İngilizce dışı kaynaklarda zayıflar.
+
+**Kurulum (elle, bir kez):** `bash $S/anlam_kur.sh` — `~/.cache/quoteproof/` içine venv (torch + transformers + bağımlılıkları ~0,9 GB) ve modeli (mDeBERTa-v3 çok dilli NLI, ~0,55 GB, MIT) indirir; `~/.config/quoteproof/config.json` dosyasını DEĞİŞTİRMEZ, eklenecek bloğu yazdırır. Sonra yapılandırmaya ekle:
+
+```json
+"nli_backend": {"python": "~/.cache/quoteproof/nli-venv/bin/python", "model_dir": "~/.cache/quoteproof/nli-model", "esik": 0.10, "pencere": 300, "cihaz": "auto"}
+```
+
+`python3 $S/ayar.py` → `anlam: var`. **Kullanım:** `arastir.py ... --anlam` (destek bloğundan sonra çalışır, `anlam.md`/`anlam.json` yazar ve varsa `notlar-temiz/`i işaretler; `--bosluk-turu` çocuğuna taşınmaz) ya da sonradan `python3 $S/anlam.py ARASTIRMA_DIZINI --isaretle`; `--kuru` önce kaç çiftin hesaplanacağını gösterir (model çağırmaz). `nli_backend` yoksa ya da yol bulunamazsa çıkış kodu **2**, alt süreç hata/zaman aşımı/eksik çıktı verirse **3**; `arastir.py` bu hatayı ana akışı düşürmeden uyarı olarak yazar. İşaret "rapordan çıkar" değil, "kaynağı elle aç ve bak" sırasıdır.
+
 ## 3. Kurallar
 
 - **Kaynaksız iddia rapora girmez.** Çalışan "Boşluklar"ına düşen şey, Claude bulana kadar boşluk olarak kalır.
@@ -151,4 +166,4 @@ birden çok bağımsız varlık/bölge → 5 · büyük küme → 6+ (gruplayara
 - Arama sağlayıcısı hız sınırına (429) takılırsa not "arama altyapısı çöktü" diyebilir: bu durumda aynı arka uç yeniden denenmez (rc=10), sıradaki FARKLI arka uca geçilir; paralelliği düşür (`-j 2`) ya da notu silip `--devam` koştur. `cli` arka ucunun `text` kipinde, çıkış kodu 0 olsa bile stdout'a düşen "API Error: Rate limit reached"/"API Error: 429"/"overloaded" metinleri de aynı hız-sınırı yolu sayılır (rc=10, aynı arka uç yeniden denenmez).
 - Sayfa önbelleği `kaynaklar/` altındadır (`oku.py`, 6 sa); arama sonuçları önbelleğe alınmaz, her koşu yeni arama yapar.
 - Notlar ve raporlar yerel dosyadır; sır içeriyorsa git'e almadan önce bir sır tarama aracıyla tara.
-- Betik testi (ağsız): `python3 $S/test_arastir.py`.
+- Betik testi (ağsız): `python3 $S/test_arastir.py` ve `python3 $S/test_anlam.py` (NLI alt süreci mock'lu).

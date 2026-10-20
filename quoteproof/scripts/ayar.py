@@ -21,6 +21,12 @@ Arama sırası (ilk bulunan kazanır):
   judge_backend  (İSTEĞE BAĞLI, hakem.py için) cli_backend ile AYNI şema; ek olarak "model": komuttaki {model} değeri. Tanımsızsa hakem.py çalışmaz.
                  Hakem komutuna ARAÇ/İZİN VERMEYİN: yalnız metin okuyup EVET/HAYIR yanıtlamalı (kaynaklardan gelen metin istemde veridir).
 
+  nli_backend    (İSTEĞE BAĞLI, anlam.py için) ayrı bir sanal ortamda çalışan çok dilli NLI modeli. Tanımsızsa anlam.py çalışmaz (hat bağımlılıksız kalır).
+                 {"python": yol, "model_dir": yol, "esik": 0..1 (varsayılan 0.10), "pencere": 50..2000 (varsayılan 300), "cihaz": "auto"|"cpu"|"mps"}
+                 "python": NLI sanal ortamının Python yolu (~ açılır) · "model_dir": yerel model dizini (~ açılır) · "esik": entailment eşiği (işaretleme)
+                 "pencere": öncül penceresi (alıntının ±karakteri) · "cihaz": auto (mps varsa) | cpu | mps. Kurulum: anlam_kur.sh (SKILL.md "Anlam denetimi").
+                 Yolların varlığı YÜKLEMEDE değil KULLANIMDA denetlenir.
+
 Anahtar değerleri asla yazdırılmaz veya kaydedilmez; yalnız alt sürecin ortamına verilir.
 """
 import json
@@ -35,7 +41,10 @@ HERE = Path(__file__).resolve().parent
 SEARCH_PATHS = (HERE.parent / "quoteproof.json", Path.home() / ".config/quoteproof/config.json")
 CLI_FORMATS = ("responses-json", "text", "claude-stream-json", "codex-jsonl")
 CLI_PROMPT_VIA = ("arg", "stdin")
-DEFAULTS = {"models": {}, "default_model": None, "api_key_env": "LLM_API_KEY", "key_files": [], "runtime_env": {}, "cli_backend": None, "judge_backend": None}
+DEFAULTS = {"models": {}, "default_model": None, "api_key_env": "LLM_API_KEY", "key_files": [], "runtime_env": {}, "cli_backend": None, "judge_backend": None, "nli_backend": None}
+NLI_ESIK = 0.10
+NLI_PENCERE = 300
+NLI_CIHAZ = ("auto", "cpu", "mps")
 _cache = {}
 
 
@@ -92,6 +101,29 @@ def _validate(cfg):
     _validate_cli("judge_backend", judge)
     if judge is not None and not (isinstance(judge.get("model", ""), str)):
         raise ConfigError("judge_backend.model metin olmalı")
+    _validate_nli(cfg.get("nli_backend"))
+
+
+def _validate_nli(nli):
+    """nli_backend şeması (yol tipleri, aralıklar). Dosyaların VARLIĞI burada denetlenmez: yalnız kullanımda (anlam.py) denetlenir."""
+    if nli is None:
+        return
+    if not isinstance(nli, dict):
+        raise ConfigError("nli_backend bir nesne olmalı")
+    for k in ("python", "model_dir"):
+        v = nli.get(k)
+        if not (isinstance(v, str) and v.strip()):
+            raise ConfigError(f"nli_backend.{k} boş olmayan bir yol (metin) olmalı")
+    if "esik" in nli:
+        e = nli["esik"]
+        if not (isinstance(e, (int, float)) and not isinstance(e, bool) and 0 <= e <= 1):
+            raise ConfigError("nli_backend.esik 0 ile 1 arasında bir sayı olmalı")
+    if "pencere" in nli:
+        p = nli["pencere"]
+        if not (isinstance(p, int) and not isinstance(p, bool) and 50 <= p <= 2000):
+            raise ConfigError("nli_backend.pencere 50 ile 2000 arasında bir tam sayı olmalı")
+    if "cihaz" in nli and nli["cihaz"] not in NLI_CIHAZ:
+        raise ConfigError(f"nli_backend.cihaz şunlardan biri olmalı: {', '.join(NLI_CIHAZ)}")
 
 
 def load(refresh=False):
@@ -202,6 +234,21 @@ def judge_prompt_via():
     return (load()["judge_backend"] or {}).get("prompt_via", "arg")
 
 
+def nli_backend():
+    """İsteğe bağlı NLI arka ucu (anlam.py). Tanımsızsa None. Yollar ~ açılarak ve varsayılanlar doldurularak döner;
+    dosyaların varlığı burada denetlenmez (kullanımda anlam.py denetler)."""
+    nli = load().get("nli_backend")
+    if not nli:
+        return None
+    out = dict(nli)
+    for k in ("python", "model_dir"):
+        out[k] = str(Path(out[k]).expanduser())
+    out.setdefault("esik", NLI_ESIK)
+    out.setdefault("pencere", NLI_PENCERE)
+    out.setdefault("cihaz", "auto")
+    return out
+
+
 def uses_opencode():
     """Yapılandırmadaki herhangi bir model OpenCode kimliği taşıyor mu? (Yalnız cli kullananlar anahtar tanımlamak zorunda değildir.)"""
     return any(isinstance(v, dict) and v.get("opencode") for v in load()["models"].values())
@@ -213,7 +260,8 @@ def describe():
     cfg = load()
     return (f"yapılandırma: {path or 'yok (varsayılanlar)'} · modeller: {', '.join(model_names()) or 'tanımsız'} · "
             f"anahtar: {('tamam' if (api_key() or not needs_key()) else 'EKSİK') if uses_opencode() else 'gerekmiyor (yalnız cli arka ucu)'} · "
-            f"cli arka ucu: {'var' if cfg['cli_backend'] else 'yok'} · hakem: {'var' if cfg['judge_backend'] else 'yok'}")
+            f"cli arka ucu: {'var' if cfg['cli_backend'] else 'yok'} · hakem: {'var' if cfg['judge_backend'] else 'yok'} · "
+            f"anlam: {'var' if cfg['nli_backend'] else 'yok'}")
 
 
 if __name__ == "__main__":

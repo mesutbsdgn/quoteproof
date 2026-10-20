@@ -107,6 +107,7 @@ Her bulgu satırında dört öğe bulunur: **iddia**, **birebir alıntı**, **bu
 | `kapsama.py` | Planda listelenen beklenen anahtar olguları (`olgular`) doğrulanmış bulgularla karşılaştırır: "kapsama 9/12, eksik: …"; yalnız eksik olguları soran bir ek plan yazar | 0 jeton |
 | `destek.py` | Her notun **Özet ve Çıkarımlar cümlelerini** denetler: içlerindeki her somut öğe (sayı, tarih, `X25519` ya da `PEP 703` gibi tanımlayıcı, kısaltma) notun kendi alıntılarında ya da atıf yaptığı sayfalarda geçmeli; yalnız sayfada, yalnız başka sorunun sayfasında ya da hiçbir yerde olanları bildirir | 0 jeton |
 | `hakem.py` | **İsteğe bağlı, deneysel.** Alıntılarda geçen bir sayının cümlenin konusuna ait olup olmadığını küçük bir modele sorar; varsayılan kapalı, çağrı sınırlı, `judge_backend` ister | model jetonu |
+| `anlam.py` | **İsteğe bağlı, varsayılan kapalı, ayrı sanal ortam ister** (`torch` + `transformers`). Çok dilli bir NLI modeline, iddianın (hipotez) sayfadaki alıntı çevresindeki pasaj (öncül) tarafından desteklenip desteklenmediğini sorar — "alıntı sayfada var ama iddiayı desteklemiyor" durumunu yakalar. Yalnız bulguları işaretler ve sıralar; "Doğrulandı" kararı değişmez. Gürültülü bir önce-bak sinyalidir, kanıt değildir | model çağrısı (ayrı venv) |
 | `uzlas.py` | Aynı konunun birkaç bağımsız çalıştırmasının doğrulanmış notlarını birleştirir: hangi iddia kaç çalıştırmada bulundu, yalnız tek çalıştırmanın bulduğu ne, ve bulguları `[k/N çalıştırma]` taşıyan birleşik not | 0 jeton |
 | `kasa.py` | Kalıcı, aranabilir kaynak kasası: okuyucunun önbelleğe aldığı sayfaları **kanonik URL anahtarıyla** indeksler (şema/host küçük harf, http→https, `www.` atılır, fragment ve izleme parametreleri atılır — aynı sayfanın iki URL biçimi tek kayıt) (SQLite FTS5, BM25), N günden eski sayfaları "yeniden doğrula" diye işaretler, aynı yazının birkaç alan adında yayımlanmış kopyasını tek kaynak sayar ve önceki koşudan "güncelleme kipi" planı yazar. Kopya kuralı `bagimsizlik.py`'yi besler; `ara`/`guncelle-plan` komutları hâlâ prototiptir | 0 jeton |
 | `bagimsizlik.py` | **Kaynak bağımsızlığı.** Her notun atıf yaptığı sayfaları içerik benzerliğine göre kümeler (kasa kuralı: 8 sözcüklük shingle + Jaccard ≥ 0,85; geçici kasa), her kümeyi TEK kaynak sayar ve ham "farklı alan adı" sayısını bağımsız kaynak sayısından ayrı tutar. `arastir.py` bunu `dogrula.py`'den sonra çalıştırır ve `bagimsizlik.md` yazar. Sınırlama: yalnız metin benzerliği — ortak sahiplik, aynı ajans zinciri ve dairesel atıf tespit edilmez, okunamayan sayfalar sayılmaz | 0 jeton |
@@ -160,7 +161,7 @@ Kod, LLM destekli iki bağımsız güvenlik incelemesinden geçti. İncelemeleri
 
 ### Gereksinimler
 
-- **Python 3.9 ya da üstü.** Üçüncü taraf paket yok.
+- **Python 3.9 ya da üstü.** Üçüncü taraf paket yok. Çekirdek hat bağımlılıksızdır; isteğe bağlı NLI anlam denetimi (`anlam.py`) ayrı bir sanal ortam isteyen bir eklentidir.
 - **Araştırma alt ajanlarını çalıştırmak için:** web arama aracı olan, komut satırından çalışan bir ajan ortamı ve istediğiniz bir LLM hesabı. Alt ajan arka ucu küçük bir JSON dosyasıyla yapılandırılır (modeller, anahtarın yeri, isteğe bağlı komut satırı arka ucu). Koda gömülü, sağlayıcıya özel hiçbir şey yoktur.
 - *İsteğe bağlı:* `gh` (GitHub depo denetimi; kimlik doğrulamasını `gh` yönetir) ve `pdftotext` (PDF sayfaları).
 

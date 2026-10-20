@@ -952,7 +952,8 @@ def _eksik_adlari(res):
 
 
 def _cocuk_komut(plan_yolu, dizin, args):
-    """Boşluk turu çocuk koşusu: aynı betik, ana koşunun bayrakları taşınır, --hafif ve --bosluk-turu 0 ile (özyineleme olmaz)."""
+    """Boşluk turu çocuk koşusu: aynı betik, ana koşunun bayrakları taşınır, --hafif ve --bosluk-turu 0 ile (özyineleme olmaz).
+    `--anlam` BİLEREK taşınmaz: isteğe bağlı NLI denetimi çocukta kapalı kalsın (ana koşuda bir kez yapılır)."""
     cmd = [sys.executable, str(Path(__file__).resolve()), str(plan_yolu), "-d", str(dizin),
            "--hafif", "--bosluk-turu", "0", "--arka", args.arka, "-e", args.efor,
            "-j", str(args.jobs), "-t", str(args.sure), "--okuyucu", args.okuyucu]
@@ -1056,7 +1057,7 @@ def bosluk_turlari(plan, base, args, ilk_res, ana_notlar):
 def temizle_turetilmis(base):
     """Önceki koşudan kalan TÜRETİLMİŞ çıktıları sil (D1): bu koşunun sonucuymuş gibi görünmesinler.
     `notlar/` (--devam istemli notları yeniden kullanır) ve `kaynaklar/` (okuma önbelleği) KORUNUR."""
-    for stale in ("destek.md", "kapsama.md", "eksik-PLAN.json", "bagimsizlik.md", "bosluk-ozet.md"):
+    for stale in ("destek.md", "kapsama.md", "eksik-PLAN.json", "bagimsizlik.md", "bosluk-ozet.md", "anlam.md", "anlam.json"):
         (base / stale).unlink(missing_ok=True)
     for dizin in ("notlar-temiz", "birlesik"):
         shutil.rmtree(base / dizin, ignore_errors=True)
@@ -1078,6 +1079,9 @@ def main():
                     help="mcp: OpenCode çalışanı sayfayı sıkıştırılmış okur (oku MCP, webfetch kapalı) · yerlesik: OpenCode webfetch (tam sayfa)")
     ap.add_argument("--dogrula-yok", action="store_true", help="otomatik iddia–kaynak doğrulamasını (dogrula.py) atla")
     ap.add_argument("--arama-yok", action="store_true", help="çalışma ortamının yerleşik `websearch` aracını açma (yalnız webfetch/MCP kalır)")
+    ap.add_argument("--anlam", action="store_true",
+                    help="isteğe bağlı NLI anlam denetimi (ayrı sanal ortam; varsayılan KAPALI): alıntı sayfada var ama iddiayı "
+                         "desteklemiyor olabilir mi? `nli_backend` + anlam_kur.sh gerekir (bkz. SKILL.md 'Anlam denetimi')")
     ap.add_argument("--devam", action="store_true",
                     help="kesilen koşuyu sürdür: aynı istemle (özet) tamamlanmış ve sözleşmeye uyan notlar yeniden üretilmez")
     ap.add_argument("--bosluk-turu", type=int, default=0, choices=list(range(BOSLUK_TAVAN + 1)),
@@ -1275,6 +1279,19 @@ def main():
                 print(f"arastir: ⚠ {strong} somut öğe notun atıf yaptığı HİÇBİR sayfada bulunamadı (uydurma, çeviri ya da hesaplanmış değer olabilir): destek.md'deki `hiçbir-yerde` satırlarını rapora almadan kaynakta elle doğrula", flush=True)
         except Exception as e:   # yardımcı denetim: hata ana akışı düşürmez
             print(f"arastir: UYARI destek.py çalışmadı ({type(e).__name__}: {e}); Özet/Çıkarımlar cümleleri otomatik denetlenmedi", file=sys.stderr)
+    if getattr(args, "anlam", False) and not args.dogrula_yok:   # İSTEĞE BAĞLI NLI anlam denetimi (ayrı venv; varsayılan kapalı)
+        nd = base / "notlar-temiz" if (base / "notlar-temiz").is_dir() else base / "notlar"
+        try:
+            import anlam   # ağır bağımlılık YOK: alt süreç ayrı venv'de; yalnız bu blokta gerekir
+            sonuc = anlam.run(base, nd, str(base / "kaynaklar"))
+            anlam.yaz(base / "anlam.md", sonuc)
+            if (base / "notlar-temiz").is_dir():   # yalnız temizlenmiş kopyaları işaretle; orijinal notlar/'a dokunma
+                n_anlam = anlam.isaretle(base / "notlar-temiz", sonuc)
+                if n_anlam:
+                    print(f"arastir: ⚠ {n_anlam} bulgu satırı notlar-temiz/'de 'anlam zayıf' diye işaretlendi", flush=True)
+            print(f"arastir: anlam denetimi: {sonuc['cift']} çift, {sonuc['isaretli']} işaretli → {base / 'anlam.md'}")
+        except Exception as e:   # yardımcı denetim: hata ana akışı düşürmez (nli_backend yoksa kurulum yönlendirmesi)
+            print(f"arastir: UYARI anlam denetimi yapılmadı ({type(e).__name__}: {e}); kurulum için SKILL.md 'Anlam denetimi' bölümüne bakın", file=sys.stderr)
     kapsama_dusuk = False
     if any(it.get("olgular") for it in plan):   # beklenen olgulara göre kapsama (0 jeton): eksikler için ek plan yazılır
         nd = base / "notlar-temiz" if (base / "notlar-temiz").is_dir() else base / "notlar"

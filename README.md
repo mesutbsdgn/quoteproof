@@ -107,6 +107,7 @@ Each finding line carries **the claim**, **a verbatim quote**, **a URL of its ow
 | `kapsama.py` | Checks the expected key facts listed in the plan (`olgular`) against the verified findings: "coverage 9/12, missing: …", and writes a follow-up plan that asks only for the missing facts | 0 tokens |
 | `destek.py` | Checks the **Summary and Inferences sentences** of each note: every concrete item in them (number, date, identifier such as `X25519` or `PEP 703`, acronym) must appear in the note's own quotes or on the pages it cites; reports what is only on a page, only on another question's page, or nowhere | 0 tokens |
 | `hakem.py` | **Optional, experimental.** Asks a small model whether a number that appears in the quotes belongs to the subject of the sentence; off by default, call-limited, needs `judge_backend` | model tokens |
+| `anlam.py` | **Optional, off by default, needs a separate venv** (`torch` + `transformers`). Asks a multilingual NLI model whether the claim (hypothesis) is entailed by the page passage around the quote (premise) — catches "the quote is on the page but does not support the claim". It only marks and orders findings; the "Verified" verdict does not change. Noisy first-look signal, not proof | model call (separate venv) |
 | `uzlas.py` | Merges the verified notes of several independent runs of the same topic: which claims were found in how many runs, what only one run found, and a merged note whose findings carry `[k/N çalıştırma]` (k of N runs) | 0 tokens |
 | `kasa.py` | Persistent, searchable source vault: indexes the pages the reader cached (SQLite FTS5, BM25) under **canonical URL keys** (scheme/host lowercased, http→https, `www.` dropped, fragment and tracking parameters removed — two URL forms of one page become one record), flags pages older than N days for re-verification, treats the same article syndicated on several domains as one source, and writes an "update mode" plan from an earlier run. Its copy rule backs `bagimsizlik.py`; the `ara` / `guncelle-plan` commands remain prototype | 0 tokens |
 | `bagimsizlik.py` | **Source independence.** Clusters the pages each note cites by content similarity (the vault rule: 8-word shingles + Jaccard ≥ 0.85, in a temporary vault), counts each cluster as ONE source, and keeps the raw "distinct domain" count separate from the independent-source count. `arastir.py` runs it after `dogrula.py` and writes `bagimsizlik.md`. Limitation: text similarity only — common ownership, the same agency chain and circular citation are not detected, and unreadable pages are not counted | 0 tokens |
@@ -160,7 +161,7 @@ The code has been through two independent LLM-assisted security reviews. Every f
 
 ### Requirements
 
-- **Python 3.9 or newer.** No third-party packages.
+- **Python 3.9 or newer.** No third-party packages. The core pipeline stays dependency-free; the optional NLI meaning check (`anlam.py`) is a separate plug-in that needs its own virtual environment.
 - **To run the research workers:** a command-line agent runtime with a web-search tool, and an LLM account of your choice. The worker back-end is configured in one small JSON file (models, key location, optional command-line back-end) — nothing provider-specific is hard-coded.
 - *Optional:* `gh` (GitHub repository checks; `gh` handles its own authentication) and `pdftotext` (PDF pages).
 
