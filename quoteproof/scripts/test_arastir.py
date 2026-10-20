@@ -2314,6 +2314,140 @@ class AnahtarOlguKapsamasi(unittest.TestCase):
         self.assertIn("2/4 olgu kapsandı (%50)", rep)
 
 
+class BoslukTuru(unittest.TestCase):
+    """Bilinen kusur 5: kapsama eşik altında kalınca ek tur otomatik koşsun (tavan 3, durgunlukta durur, birleşik kapsama eşiği geçerse 73 nedeni düşer).
+    Boşluk tespiti AYRI ve ucuzdur (kapsama.py, 0 jeton); ek tur URL'leri yeniden taramasın diye zaten okunan alan adları isteme yazılır."""
+
+    ITEM = {"slug": "konu", "konu": "k", "sorular": ["s?"], "kisitlar": "y", "min_url": 3,
+            "olgular": [{"ad": "a", "ara": "a"}, {"ad": "b", "ara": "b"}]}
+
+    def _res(self, eksik, toplam=2):
+        rows = [{"ad": n, "ara": n, "kapsayan": []} for n in eksik]
+        return {"konu": {"item": self.ITEM, "etiketler": ["x"], "olgular": rows, "kapsanan": toplam - len(rows),
+                         "toplam": toplam, "eksik": rows, "etiket_kapsama": {"x": toplam - len(rows)}}}
+
+    def test_karar_dort_durum(self):
+        self.assertEqual(arastir.bosluk_karari(["a", "b"], [], 1, 3), ("dur", "eksik kalmadı"))
+        self.assertEqual(arastir.bosluk_karari(["a", "b"], ["a", "b"], 1, 3), ("dur", "bu turda hiç yeni olgu kapsanmadı (durgunluk)"))
+        self.assertEqual(arastir.bosluk_karari(["a", "b"], ["a"], 3, 3), ("dur", "tavana ulaşıldı"))
+        self.assertEqual(arastir.bosluk_karari(["a", "b"], ["a"], 1, 3), ("devam", ""))
+
+    def test_n_sifir_cocuk_kosu_acmaz(self):
+        with tempfile.TemporaryDirectory() as d:
+            args = mock.Mock(bosluk_turu=0)
+            with mock.patch.object(arastir.subprocess, "run") as run:
+                res, dusuk = arastir.bosluk_turlari([self.ITEM], Path(d), args, self._res(["a"]), Path(d) / "notlar-temiz")
+        self.assertFalse(run.called)
+        self.assertTrue(dusuk)
+
+    def test_durgunlukta_ikinci_tur_acilmaz(self):
+        dirs = []
+        def fake_run(cmd, check=False):
+            dirs.append(cmd); return mock.Mock(returncode=0)
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(arastir.kapsama, "run", return_value=self._res(["a", "b"])):
+            args = mock.Mock(bosluk_turu=3, arka="cli", efor="dusuk", jobs=1, sure=60, okuyucu="mcp", model=None, arama_yok=True)
+            with mock.patch.object(arastir.subprocess, "run", side_effect=fake_run):
+                arastir.bosluk_turlari([self.ITEM], Path(d), args, self._res(["a", "b"]), Path(d) / "notlar-temiz")
+            ozet = (Path(d) / "bosluk-ozet.md").read_text(encoding="utf-8")
+        self.assertEqual(len(dirs), 1)                          # yalnız 1 çocuk koşu; durgunluk nedeniyle 2. tur açılmadı
+        self.assertIn("durgunluk", ozet)
+
+    def test_cocuk_kodu_64_ise_dongu_kisilir(self):
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(arastir.kapsama, "run") as krun:
+            args = mock.Mock(bosluk_turu=3, arka="cli", efor="dusuk", jobs=1, sure=60, okuyucu="mcp", model=None, arama_yok=True)
+            with mock.patch.object(arastir.subprocess, "run", return_value=mock.Mock(returncode=64)) as run:
+                arastir.bosluk_turlari([self.ITEM], Path(d), args, self._res(["a", "b"]), Path(d) / "notlar-temiz")
+            ozet = (Path(d) / "bosluk-ozet.md").read_text(encoding="utf-8")
+        self.assertEqual(run.call_count, 1)
+        self.assertFalse(krun.called)                           # başarısız turda birleşik kapsama yeniden hesaplanmaz
+        self.assertIn("64", ozet)
+
+    def test_cocuk_komutu_hafif_ve_aktarilan_bayraklar(self):
+        args = mock.Mock(arka="opencode", model="m1", efor="orta", jobs=2, sure=99, okuyucu="yerlesik", arama_yok=True)
+        cmd = arastir._cocuk_komut(Path("/p.json"), Path("/d"), args)
+        self.assertIn("--hafif", cmd)
+        self.assertEqual(cmd[cmd.index("--bosluk-turu") + 1], "0")
+        for flag, val in (("--arka", "opencode"), ("-e", "orta"), ("-j", "2"), ("-t", "99"), ("--okuyucu", "yerlesik"), ("--model", "m1")):
+            self.assertEqual(cmd[cmd.index(flag) + 1], val)
+        self.assertIn("--arama-yok", cmd)
+        kapali = arastir._cocuk_komut(Path("/p.json"), Path("/d"), mock.Mock(arka="cli", model=None, efor="dusuk", jobs=1, sure=1, okuyucu="mcp", arama_yok=False))
+        self.assertNotIn("--arama-yok", kapali)
+        self.assertNotIn("--model", kapali)
+
+    def test_tavani_asan_tur_argparse_reddeder(self):
+        with tempfile.TemporaryDirectory() as d:
+            argv = ["arastir.py", str(Path(d) / "PLAN.json"), "-d", d, "--bosluk-turu", "7"]
+            with mock.patch.object(sys, "argv", argv), contextlib.redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit) as cm:
+                    arastir.main()
+        self.assertEqual(cm.exception.code, 2)
+
+    def test_kisitlar_ve_ozet_yazilir(self):
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(arastir.kapsama, "run", return_value=self._res(["c"], toplam=5)):
+            nd = Path(d) / "notlar-temiz"; nd.mkdir()
+            (nd / "konu.md").write_text("c — [K](https://a.example/x)\n", encoding="utf-8")
+            args = mock.Mock(bosluk_turu=1, arka="cli", efor="dusuk", jobs=1, sure=60, okuyucu="mcp", model=None, arama_yok=True)
+            with mock.patch.object(arastir.subprocess, "run", return_value=mock.Mock(returncode=0)):
+                nihai, dusuk = arastir.bosluk_turlari([self.ITEM], Path(d), args, self._res(["a", "b", "c"], toplam=5), nd)
+            ep = json.loads((Path(d) / "bosluk-1-PLAN.json").read_text(encoding="utf-8"))
+            ozet = (Path(d) / "bosluk-ozet.md").read_text(encoding="utf-8")
+        self.assertEqual(len(ep), 1)
+        self.assertIn("GÜNCELLEME KİPİ", ep[0]["kisitlar"])
+        self.assertIn("eksik olguları ara: a; b; c", ep[0]["kisitlar"])   # 1. turun eksikleri (a, b, c) cümlede
+        self.assertIn("a.example", ep[0]["kisitlar"])               # ziyaret edilen alan adı isteme yazıldı
+        ep2 = kapsama.eksik_plan(nihai)
+        self.assertEqual({o["ad"] for o in ep2[0]["olgular"]}, {"c"})
+        self.assertIn("| 1 | 3 → 1 |", ozet)
+        self.assertIn("uzlas.py", ozet)
+        self.assertIn("--yaz birlesik/", ozet)
+        self.assertFalse(dusuk)                                     # nihai kapsama 4/5 = %80 ≥ 0,6 → 73 nedeni düşer
+
+
+class BoslukTuruAkis(unittest.TestCase):
+    """arastir.py ana akışı: --bosluk-turu 0 iken hiç çocuk koşu açılmaz; N>0 iken aynı betiği --hafif ve --bosluk-turu 0 ile çağırır."""
+
+    NOTE = ("# Konu\n\n## Soru 1\n### Özet\nEk yük ölçüldü.\n### Alıntılı bulgular\n"
+            "- A — \"The overhead is about 8% on x86-64 Linux.\" — [A](https://example.org/a) (2025-10, birincil)\n"
+            "- B — \"A second quote long enough for the checker.\" — [B](https://example.org/b) (2025-10, birincil)\n"
+            "- C — \"A third quote long enough for the checker.\" — [C](https://example.org/c) (2025-10, birincil)\n"
+            "### Çıkarımlar\n- (yok)\n### Boşluklar\n- (belirtilmedi)\n")
+    PLAN = [{"slug": "konu", "konu": "k", "sorular": ["s?"], "min_url": 3,
+             "olgular": [{"ad": "kapsanan", "ara": "8% on x86-64"}, {"ad": "eksik", "ara": "zzztoken"}]}]
+
+    def _main(self, extra=()):
+        cmds = []
+        def fake_run(cmd, check=False, **k):
+            cmds.append(" ".join(str(x) for x in cmd))
+            return mock.Mock(returncode=0)
+        def fake_worker(item, base, args, delay=0.0, sequence=None):
+            (base / "notlar" / f"{item['slug']}.md").write_text(self.NOTE)
+            return {"slug": item["slug"], "ok": True, "deneme": 1, "arka": "cli", "rc": 0, "hata": "", "bayt": len(self.NOTE),
+                    "sure_sn": 1, "denemeler": [], "jeton": [1, 1], "araclar": {}}
+        with tempfile.TemporaryDirectory() as d:
+            Path(d, "PLAN.json").write_text(json.dumps(self.PLAN), encoding="utf-8")
+            argv = ["arastir.py", str(Path(d) / "PLAN.json"), "-d", d, "--arka", "cli", *extra]
+            page = {"ok": True, "markdown": "Lorem ipsum dolor sit amet. " * 30, "hata": ""}
+            with mock.patch.object(sys, "argv", argv), mock.patch.object(arastir, "available_backends", return_value={"cli"}), \
+                 mock.patch.object(arastir, "run_worker", side_effect=fake_worker), mock.patch.object(destek.oku, "load", return_value=page), \
+                 mock.patch.object(arastir.subprocess, "run", side_effect=fake_run), contextlib.redirect_stdout(io.StringIO()):
+                arastir.main()
+            vardi = (Path(d) / "bosluk-1-PLAN.json").exists()
+        return cmds, vardi
+
+    def test_varsayilan_kapali(self):
+        cmds, vardi = self._main()
+        self.assertFalse(any("--bosluk-turu" in c for c in cmds))
+        self.assertFalse(vardi)
+
+    def test_otomatik_tur_cocugu_cagirir(self):
+        cmds, vardi = self._main(["--bosluk-turu", "1"])
+        child = [c for c in cmds if "--bosluk-turu" in c]
+        self.assertEqual(len(child), 1)
+        self.assertIn("--hafif", child[0])
+        self.assertIn("--bosluk-turu 0", child[0])
+        self.assertTrue(vardi)
+
+
 class HafifKip(unittest.TestCase):
     """Canlı ölçüm (9 Ekim 2026, ucuz model): tam kip doğrudan koşunun 3–7 katı jeton harcıyordu (arama sonuçları 12–24 bin karakter/arama, 8 sonuç,
     10–15 aramalık bütçe); --hafif doğrudan koşuya yakın kaldı ve alıntı doğrulamasını korudu."""
@@ -2826,6 +2960,110 @@ class HakemModulu(unittest.TestCase):
                 self.assertIn("gerekmiyor", ayar.describe())
                 self.assertNotIn("EKSİK", ayar.describe())
             ayar._cache.clear()
+
+
+class SirMaskesiDaraltma(unittest.TestCase):
+    """K1: sır maskesi not düzyazısını bozmaz; yalnız gerçek anahtar biçimleri ve birleşik alan atamaları maskelenir.
+    Geniş `redact` (hata/log/calisma.json) düzyazıyı yutmaz ama gerçek anahtarları maskeler."""
+
+    def test_not_maskesi_duzyaziyi_bozmaz(self):
+        for prose in ("Her token için fiyat", "the secret sauce of llama.cpp",
+                      "time to first token of less than 70 ms", "token: gizli_olmayan_kısa"):
+            self.assertEqual(arastir.redact_not(prose), prose)
+
+    def test_not_maskesi_birlesik_alan_ve_bilinen_onekleri_maskeler(self):
+        masked = arastir.redact_not('{"api_key":"sk/ABC+def==123456", "accessToken":"tok+en/with==symbols"}')
+        self.assertNotIn("sk/ABC+def==123456", masked)
+        self.assertNotIn("tok+en/with==symbols", masked)
+        self.assertIn('"api_key":"[GİZLİ]"', masked)
+        self.assertIn('"accessToken":"[GİZLİ]"', masked)
+        self.assertNotIn("sk-abcdefghijkl1234567890", arastir.redact_not("anahtar sk-abcdefghijkl1234567890 burada"))
+        self.assertNotIn("abcdefgh1234567890ABCD", arastir.redact_not("Authorization: Bearer abcdefgh1234567890ABCD"))
+
+    def test_genis_maske_duzyaziyi_yutmaz_gercek_anahtari_maskeler(self):
+        for prose in ("Her token için fiyat", "the secret sauce of llama.cpp", "time to first token of less than 70 ms"):
+            self.assertEqual(arastir.redact(prose), prose)
+        self.assertNotIn("abcdefghijkl1234", arastir.redact("token sk-abcdefghijkl1234/+=="))
+
+    def test_not_diske_yazilinca_duzyazi_bozulmaz(self):
+        note = ("# k\n\n## s?\n### Özet\nBu notta her token için fiyat hesaplanır; the secret sauce of llama.cpp anlatılır.\n"
+                "### Alıntılı bulgular\n- x \"a quote long enough here\" — [K](https://x.example/1)\n"
+                "### Çıkarımlar\napi_key: gizli_olmayan_kısa\n### Boşluklar\n—\n")
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "n.md"
+            arastir.write_note(p, note)
+            written = p.read_text(encoding="utf-8")
+        self.assertIn("her token için fiyat", written)
+        self.assertIn("the secret sauce of llama.cpp", written)
+        self.assertIn("api_key: [GİZLİ]", written)     # atama (":" ayraçlı) maskelenir
+        self.assertNotIn("gizli_olmayan_kısa", written)
+
+
+class PlanModuBasligi(unittest.TestCase):
+    """O4: başlık satırları ("#") plan dili aramasından hariç; gövdedeki gerçek onay isteme yakalanır."""
+
+    def test_plan_modu_konulu_baslik_notu_reddettirmez(self):
+        note = GOOD_NOTE.replace("# k\n", "# Claude Code plan modu nedir\n", 1)
+        self.assertTrue(arastir.check_contract(note)[0])
+
+    def test_govdedeki_onay_isteme_yakalanir(self):
+        note = GOOD_NOTE.replace("### Özet\nx\n", "### Özet\nPlan modu bahanesiyle yaklaşımı onayınıza sunuyorum.\n", 1)
+        ok, why = arastir.check_contract(note)
+        self.assertFalse(ok)
+        self.assertIn("plan", why)
+
+
+class TuretilmisTemizligi(unittest.TestCase):
+    """D1: koşu başında önceki koşudan kalan türetilmiş çıktılar silinir; erken dönüşte de kalmasın."""
+
+    def test_kosu_basinda_eski_turetilmis_ciktilar_silinir(self):
+        seen = {}
+        def fake(item, base, args, delay=0.0, sequence=None):
+            seen["temiz"] = (all(not (base / f).exists() for f in
+                                 ("destek.md", "kapsama.md", "eksik-PLAN.json", "bagimsizlik.md", "bosluk-ozet.md"))
+                             and not (base / "notlar-temiz").exists() and not (base / "birlesik").exists())
+            return {"slug": item["slug"], "ok": False, "deneme": 1, "arka": "cli", "rc": 9, "hata": "x",
+                    "bayt": 0, "sure_sn": 1, "denemeler": [], "jeton": [0, 0], "araclar": {}}
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / "PLAN.json").write_text(json.dumps([{"slug": "a", "konu": "k", "sorular": ["s?"]}]), encoding="utf-8")
+            (Path(d) / "notlar-temiz").mkdir(); (Path(d) / "notlar-temiz" / "eski.md").write_text("x")
+            (Path(d) / "birlesik").mkdir(); (Path(d) / "birlesik" / "denetim.md").write_text("x")
+            for f in ("destek.md", "kapsama.md", "eksik-PLAN.json", "bagimsizlik.md", "bosluk-ozet.md"):
+                (Path(d) / f).write_text("eski")
+            argv = ["arastir.py", str(Path(d) / "PLAN.json"), "-d", d, "--link-yok", "--arka", "cli"]
+            with mock.patch.object(sys, "argv", argv), mock.patch.object(arastir, "available_backends", return_value={"cli"}), \
+                 mock.patch.object(arastir, "run_worker", side_effect=fake), \
+                 mock.patch.object(arastir.subprocess, "run", return_value=mock.Mock(returncode=0)):
+                rc = arastir.main()
+            self.assertEqual(rc, 70)                       # tüm çalışanlar başarısız: erken dönüş (rc=70)
+            self.assertTrue(seen.get("temiz"))
+            self.assertFalse((Path(d) / "notlar-temiz").exists())
+            self.assertFalse((Path(d) / "destek.md").exists())
+            self.assertFalse((Path(d) / "birlesik").exists())
+
+
+class ApiHatasiSiniri(unittest.TestCase):
+    """O5: cli `text` kipinde exit 0 ile stdout'a düşen API hata metinleri de rc=10 yolunu tetikler."""
+
+    def test_api_hata_metinleri_sinir_nedeni_verir(self):
+        for metin in ("API Error: Rate limit reached", "API Error: 429", "the model is overloaded"):
+            self.assertIsNotNone(arastir.sinir_nedeni(metin), metin)
+        self.assertIsNone(arastir.sinir_nedeni("UV 0.12.23 yayımlandı; 429 bir HTTP durum kodudur."))
+
+    def test_metin_kipindeki_api_hatasi_ayni_arka_ucu_yeniden_denemez(self):
+        calls = []
+        def fake_cli(prompt_text, note, *a, **k):
+            calls.append("cli")
+            note.write_text("API Error: Rate limit reached")
+            return {"rc": 0}
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(arastir, "work_cli", side_effect=fake_cli), \
+             mock.patch.object(arastir.time, "sleep"):
+            base = Path(d); (base / "istemler").mkdir(); (base / "notlar").mkdir()
+            args = mock.Mock(arka="cli", sure=60, model="fast", efor="dusuk", arama_yok=False, okuyucu="mcp")
+            res = arastir.run_worker({"slug": "a", "konu": "k", "sorular": ["s?"]}, base, args, 0, ["cli", "cli"])
+        self.assertEqual(calls, ["cli"])                   # ikinci cli denemesi ATLANDI
+        self.assertEqual(res["denemeler"][0]["rc"], 10)
+        self.assertIn("hız sınırı", res["denemeler"][0]["hata"])
 
 
 if __name__ == "__main__":

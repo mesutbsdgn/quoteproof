@@ -12,7 +12,8 @@ Arka uçlar (model/sağlayıcı/anahtar ayrıntıları koda gömülü değildir:
 
 PLAN.json: [{"slug","konu","amac","sorular":[...],"kaynaklar","kisitlar",
              "single_publisher_host":"rfc-editor.org" (isteğe bağlı)}, ...]
-Çıktı dizini: istemler/<slug>.md · notlar/<slug>.md · calisma.json · denetim.md
+Çıktı dizini: istemler/<slug>.md · notlar/<slug>.md · calisma.json · denetim.md · dogrulama.md · destek.md ·
+             bagimsizlik.md (kaynak bağımsızlığı: kopya kümeleri tek oy)
 """
 import argparse
 import hashlib
@@ -34,6 +35,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import ayar  # noqa: E402
+import bagimsizlik  # noqa: E402
 import destek  # noqa: E402
 import kapsama  # noqa: E402
 import denetle  # noqa: E402
@@ -51,13 +53,17 @@ REQUIRED_SECTION = "Alıntılı bulgular"   # çalışan çıktı sözleşmesi (
 # (konu bazında min_url_required) benzersiz URL + plan/onay dili yok + (OpenCode'da) en az bir arama/okuma aracı çağrısı.
 HEADING_RE = re.compile(r"(?m)^#{2,4}[ \t]*Alıntılı bulgular\b")
 URL_RE = re.compile(r"https?://[^\s)>\]\"']+")
+_HOST_RE = re.compile(r"https?://([^/\s)>\]\"']+)", re.I)   # ziyaret edilen alan adı (boşluk turu "zaten okuduk" notu)
 PLAN_RE = re.compile(r"(?i)plan modu|onay(?:ına|ınıza|ınızı|ınız)\s+(?:sun|bekle)|yaklaşımı onay|onaylarsanız|onay vermenizi|awaiting (?:your )?approval")
 # 8 Eki 2026: arama sağlayıcısı oturum boyunca 429 verdi; çalışan "Araştırma tamamlanamadı, arama altyapısı çöktü" yazıp 3 denemede aynı duvara çarptı.
 # Yalnız arama aracı/sağlayıcısı hatası açıkça raporlanınca aynı arka ucu yeniden deneme (rc=10). Araştırma içeriğindeki HTTP 429/rate-limit
 # bilgileri tek başına hata sinyali değildir (örn. robots.txt belgeleri 429 istisnasından söz eder).
 RATE_RE = re.compile(
     r"(?i)(?:"
-    r"\barama (?:altyapısı|sağlayıcısı) çöktü\b"
+    r"\bapi error:\s*(?:rate limit|429\b|overloaded)"                       # O5: cli `text` kipinde exit 0 + stdout'a düşen API hatası
+    r"|\brate limit reached\b"
+    r"|\boverloaded\b"
+    r"|\barama (?:altyapısı|sağlayıcısı) çöktü\b"
     r"|(?:\bwebsearch\b|\bsearch (?:provider|tool|backend)\b|\barama (?:aracı|sağlayıcısı|altyapısı)\b)"
     r"[^.\n]{0,160}(?:\b429\b|rate.?limit|hız sınırı)[^.\n]{0,100}(?:döndür\w*|return\w*|hit|failed|error|exceed\w*)"
     r"|\baraştırma tamamlanamadı\b[^\n]{0,300}"
@@ -83,11 +89,35 @@ BROAD_TOPIC_ENTITIES = 6   # bir konuda bu kadar ya da daha çok varlık (ülke/
 MIN_URLS = 3        # varsayılan kabul eşiği; dar konular planda min_url_required ile düşürebilir
 MIN_URLS_REQUIRED_MIN = 2  # kabul eşiğinde en az iki farklı URL ile çapraz kaynak gerekir
 WEAK_URLS = 8       # bunun altı kabul edilir ama "zayıf" işaretlenir (çıkış kodu 73; örn. arama 429'a düştü)
+BOSLUK_TAVAN = 3    # --bosluk-turu üst sınırı: ek tur başına ölçülen yararlı kazanç ilk 1–3 turda (STORM M=5, open_deep_research 6, ScholarGym T=5 ortalamalarının altında, ucuz hat olduğumuz için)
+BOSLUK_HOST_SINIRI = 12  # ek turun istemine "bunları zaten okuduk" notu için en çok bu kadar alan adı yazılır
 SECRET_FIELD = r"(?:[a-z0-9]+[_-])?(?:secret[_-]?access[_-]?key|api[_-]?key|access[_-]?token|refresh[_-]?token|id[_-]?token|client[_-]?secret|private[_-]?key|token|secret|authorization|bearer|password|passwd|credential)"
 SECRET_FIELD_RE = re.compile(rf"^(?:{SECRET_FIELD})$", re.I)
+# K1: GENİŞ maske (hata metni, log, calisma.json). Alan adına sol sınır (\b) konur ve yalnız boşlukla ayrılmış
+# (":" ya da "=" OLMAYAN) biçimde değerin gerçekten gizli-benzeri olması istenir; böylece "Her token için fiyat" gibi düzyazı yutulmaz.
 SECRET_RE = re.compile(
-    rf"(?i)(?P<prefix>[\"']?{SECRET_FIELD}[\"']?(?:\s*[:=]\s*|\s+))"
+    rf"(?i)(?P<prefix>[\"']?\b{SECRET_FIELD}[\"']?(?P<sep>\s*[:=]\s*|\s+))"
     r"(?P<value>\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*'|Bearer\s+[^\s,;}\]]+|[^\s,;}\]]+)"
+)
+# K1: not gövdesi için DAR maske. Yalnız (i) bilinen anahtar önekleri ve (ii) BİRLEŞİK alan adlı atamalar
+# (yalnız ":" ya da "=" ayraçlı) maskelenir. Düzyazıdaki tek başına "token"/"secret"/"credential" alan adı SAYILMAZ;
+# boşlukla ayrılmış ("token için") biçim ASLA maskelenmez.
+NOT_ASSIGN_FIELD = r"(?:api[_-]?key|access[_-]?token|secret[_-]?access[_-]?key|client[_-]?secret|private[_-]?key|password|passwd)"
+NOT_ASSIGN_RE = re.compile(
+    rf"(?i)(?P<prefix>[\"']?\b{NOT_ASSIGN_FIELD}[\"']?\s*[:=]\s*)"
+    r"(?P<value>\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*'|[^\s,;}\]]+)"
+)
+NOT_TOKEN_RE = re.compile(
+    r"(?i)(?:"
+    r"(?<![A-Za-z0-9])sk-[A-Za-z0-9_\-]{20,}"
+    r"|(?<![A-Za-z0-9])AKIA[0-9A-Z]{16}"
+    r"|(?<![A-Za-z0-9])(?:ghp|gho|ghs)_[A-Za-z0-9]{20,}"
+    r"|(?<![A-Za-z0-9])github_pat_[A-Za-z0-9_]{20,}"
+    r"|(?<![A-Za-z0-9])xox[bap]-[A-Za-z0-9-]{10,}"
+    r"|(?<![A-Za-z0-9])AIza[0-9A-Za-z_\-]{20,}"
+    r"|(?<![A-Za-z0-9])eyJ[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+"
+    r"|\bBearer\s+[A-Za-z0-9._\-+/=]{20,}"
+    r")"
 )
 # Araç çağrısı döngüsünü sınırlar: sınıra gelince OpenCode araçsız nihai cevap yazmaya zorlar (aksi halde sonsuza dek arayabilir).
 STEPS_BY_EFFORT = {"dusuk": 16, "orta": 24, "yuksek": 32}
@@ -342,18 +372,44 @@ def parse_opencode_events(stdout):
             "adimlar": [profile[n] for n in sorted(profile)]}
 
 
+def _mask_value(value):
+    """Maske değerini biçimi koruyarak üret (JSON/YAML tırnakları, Bearer öneki)."""
+    if len(value) >= 2 and value[0] in ("\"", "'") and value[-1] == value[0]:
+        return value[0] + "[GİZLİ]" + value[0]   # JSON/YAML tırnaklarını koru
+    if value.lower().startswith("bearer "):
+        return "Bearer [GİZLİ]"
+    return "[GİZLİ]"
+
+
+def _gizli_benzeri(value):
+    """Boşlukla (":" ya da "=" olmadan) ayrılmış bir değerin gerçekten gizli-benzeri olup olmadığı:
+    ≥20 karakter, boşluksuz, harf ve rakam karışık. Böylece düzyazı sözcükler ("Her token için fiyat") maskelenmez."""
+    v = value.strip("\"'")
+    return len(v) >= 20 and not any(c.isspace() for c in v) and any(c.isalpha() for c in v) and any(c.isdigit() for c in v)
+
+
 def redact(text):
-    """Metin/JSON içindeki anahtar değerlerini karartır (hata, not ve sonuç dosyalarında)."""
+    """Metin/JSON içindeki anahtar değerlerini karartır (hata metni, log, calisma.json için GENİŞ maske).
+    Yalnız boşlukla ayrılmış (":" ya da "=" OLMAYAN) değer gizli-benzeri değilse düzyazı kabul edilir ve dokunulmaz."""
     def mask(match):
-        value = match.group("value")
-        if len(value) >= 2 and value[0] in ("\"", "'") and value[-1] == value[0]:
-            value = value[0] + "[GİZLİ]" + value[0]  # JSON/YAML tırnaklarını koru
-        elif value.lower().startswith("bearer "):
-            value = "Bearer [GİZLİ]"
-        else:
-            value = "[GİZLİ]"
-        return match.group("prefix") + value
+        sep = match.groupdict().get("sep") or ""
+        if ":" not in sep and "=" not in sep and not _gizli_benzeri(match.group("value")):
+            return match.group(0)
+        return match.group("prefix") + _mask_value(match.group("value"))
     return SECRET_RE.sub(mask, text or "")
+
+
+def redact_not(text):
+    """Not gövdesi için DAR maske (K1): yalnız bilinen anahtar önekleri ve birleşik alan adlı atamalar (":" ya da "=").
+    Düzyazı ("Her token için fiyat", "the secret sauce", "token: gizli_olmayan_kısa") ASLA bozulmaz;
+    tek başına "token"/"secret"/"credential" alan adı sayılmaz."""
+    def assign(match):
+        return match.group("prefix") + _mask_value(match.group("value"))
+
+    def token(match):
+        return "Bearer [GİZLİ]" if match.group(0).lower().startswith("bearer") else "[GİZLİ]"
+
+    return NOT_TOKEN_RE.sub(token, NOT_ASSIGN_RE.sub(assign, text or ""))
 
 
 def redact_data(value):
@@ -369,8 +425,8 @@ def redact_data(value):
 
 
 def write_note(path, text):
-    """Her arka uç için ortak, gizli değerleri karartan not yazma kapısı."""
-    Path(path).write_text(redact((text or "").rstrip("\n") + "\n"), encoding="utf-8")
+    """Her arka uç için ortak, gizli değerleri karartan not yazma kapısı. Not DÜZYAZIdır: dar maske (redact_not)."""
+    Path(path).write_text(redact_not((text or "").rstrip("\n") + "\n"), encoding="utf-8")
 
 
 def redact_file(path):
@@ -402,11 +458,18 @@ def hata_ozeti(err, out="", rc=None, ad="", sinir=200):
     return ozet if len(ozet) <= sinir else "…" + ozet[-(sinir - 1):]
 
 
+def _plan_dili(text):
+    """İlk 1200 karakterde plan/onay dili var mı (O4). '#' ile başlayan BAŞLIK satırları hariç tutulur:
+    konusu 'plan modu' olan geçerli notun başlığı redde yol açmasın; ama gövdedeki gerçek onay isteme yakalanır."""
+    satirlar = [l for l in text[:1200].splitlines() if not l.lstrip().startswith("#")]
+    return PLAN_RE.search("\n".join(satirlar))
+
+
 def check_contract(text, minimum=MIN_NOTE_BYTES, minimum_urls=MIN_URLS, expected_questions=None):
     """Çalışan çıktısının sözleşmeye uyup uymadığı: (ok, neden). Boş/kısa/başlıksız/kaynaksız/plan metni çıktı başarı sayılmaz."""
     if len(text.encode("utf-8")) < minimum:
         return False, f"çıktı çok kısa (<{minimum} bayt)"
-    if PLAN_RE.search(text[:1200]):   # plan/onay dili notun BAŞINDA olur; konu gereği geçen anmalar (gövdede) reddedilmez
+    if _plan_dili(text):   # plan/onay dili notun BAŞINDA olur; konu gereği başlıkta geçen anmalar reddedilmez
         return False, "plan/onay metni döndürdü (araştırma yapılmadı): 'Plan Modu' bahanesiyle onay istedi"
     if not HEADING_RE.search(text):
         return False, f"'{REQUIRED_SECTION}' başlığı yok (çıktı sözleşmesi bozuk)"
@@ -840,7 +903,165 @@ def weak_notes(base, results, plan):
     return weak
 
 
+def _ziyaret_hostlari(dirs):
+    """Notlardaki URL'lerden ziyaret edilen alan adları (en çok BOSLUK_HOST_SINIRI, sırayla).
+    Ek boşluk turunun istemine "şu alan adlarını daha önce okuduk" notu için kullanılır (aynı URL'leri yeniden taramamak)."""
+    out = []
+    for d in dirs:
+        p = Path(d)
+        if not p.is_dir():
+            continue
+        for f in sorted(p.glob("*.md")):
+            try:
+                text = f.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            for host in _HOST_RE.findall(text):
+                host = host.split(":", 1)[0].lower()
+                if host and host not in out:
+                    out.append(host)
+                    if len(out) >= BOSLUK_HOST_SINIRI:
+                        return out
+    return out
+
+
+def guncelleme_kisiti(mevcut, adlar, hostlar):
+    """Ek turun `kisitlar` metnine GÜNCELLEME KİPİ cümlesini ekler: yalnız eksik olguları ara + zaten okunan alan adları."""
+    ek = ("GÜNCELLEME KİPİ: yalnız şu eksik olguları ara: " + "; ".join(adlar)
+          + "; şu alan adlarını daha önce okuduk: " + (", ".join(hostlar) if hostlar else "(yok)"))
+    mevcut = (mevcut or "").strip()
+    return f"{mevcut} {ek}".strip() if mevcut else ek
+
+
+def bosluk_karari(onceki_eksik_adlari, simdiki_eksik_adlari, tur, tavan):
+    """Boşluk turu durma kararı (saf): ("devam"|"dur", neden).
+
+    Üç eksen (araştırma dayanağı): kalite eşiği (eksik kaldı mı), durgunluk (bu turda yeni olgu kapsanmadı mı), tur/bütçe tavanı.
+    Durgunluk: birleşik kapsama monoton olduğundan `simdiki`, `onceki`nin alt kümesidir; eşitse bu tur yeni olgu kapsamadı."""
+    if not simdiki_eksik_adlari:
+        return "dur", "eksik kalmadı"
+    if set(simdiki_eksik_adlari) >= set(onceki_eksik_adlari):
+        return "dur", "bu turda hiç yeni olgu kapsanmadı (durgunluk)"
+    if tur >= tavan:
+        return "dur", "tavana ulaşıldı"
+    return "devam", ""
+
+
+def _eksik_adlari(res):
+    return [e["ad"] for r in res.values() for e in r["eksik"]]
+
+
+def _cocuk_komut(plan_yolu, dizin, args):
+    """Boşluk turu çocuk koşusu: aynı betik, ana koşunun bayrakları taşınır, --hafif ve --bosluk-turu 0 ile (özyineleme olmaz)."""
+    cmd = [sys.executable, str(Path(__file__).resolve()), str(plan_yolu), "-d", str(dizin),
+           "--hafif", "--bosluk-turu", "0", "--arka", args.arka, "-e", args.efor,
+           "-j", str(args.jobs), "-t", str(args.sure), "--okuyucu", args.okuyucu]
+    if getattr(args, "model", None):
+        cmd += ["--model", args.model]
+    if getattr(args, "arama_yok", False):
+        cmd.append("--arama-yok")
+    return cmd
+
+
+def bosluk_ozet_render(kayitlar, nihai_res, kaynaklar):
+    """`bosluk-ozet.md`: tur tablosu (tur, eksik önce→sonra, yeni kapsanan, çocuk çıkış kodu, süre) + nihai birleşik kapsama + birleştirme komutu."""
+    L = ["# Boşluk turları (otomatik)", "",
+         "Eksik kalan olgular için hedefli ek çalıştırmalar; her tur birleşik kapsamaya göre değerlendirilir.", "",
+         "| Tur | Eksik önce → sonra | Yeni kapsanan olgular | Çocuk kodu | Süre |", "|---:|---:|---|---:|---:|"]
+    for k in kayitlar:
+        yeni = ", ".join(k.get("yeni") or []) or "—"
+        rc = k.get("rc")
+        L.append(f"| {k['tur']} | {len(k['onceki'])} → {len(k['simdiki'])} | {yeni} | "
+                 f"{rc if rc is not None else '—'} | {k.get('sure', '—')} sn |")
+        if k.get("neden"):
+            L.append(f"\nDurdurma nedeni: {k['neden']} (tur {k['tur']}).\n")
+    L += ["", "## Nihai birleşik kapsama", "", kapsama.render(nihai_res).rstrip(), ""]
+    if len(kaynaklar) >= 2:
+        L += ["", "Birleştirme: `uzlas.py " + " ".join(kaynaklar) + " --yaz birlesik/`"]
+    return "\n".join(L) + "\n"
+
+
+def _birlestir(base, ana_notlar, cocuk_dirs):
+    """Mevcut `uzlas.py`'ı otomatik çağırıp birleşik notları yazar; başarısızsa uyarır, ana akışı düşürmez."""
+    dirs = [d for d in cocuk_dirs if Path(d).is_dir()]
+    if not dirs:
+        return
+    cmd = [sys.executable, str(HERE / "uzlas.py"), str(ana_notlar)] + [str(d) for d in dirs]
+    cmd += ["--cikti", str(base / "bosluk-uzlasi.md"), "--yaz", str(base / "birlesik")]
+    try:
+        rc = subprocess.run(cmd, check=False).returncode
+    except OSError as e:
+        print(f"arastir: UYARI birleştirme (uzlas.py) çalışmadı ({type(e).__name__}: {e}); birleşik/ elle üretilmeli", file=sys.stderr)
+        return
+    if rc != 0:
+        print(f"arastir: UYARI uzlas.py çıkış kodu {rc}; birleşik not üretilemedi (elle: uzlas.py ... --yaz birlesik/)", file=sys.stderr)
+    else:
+        print(f"arastir: birleşik not → {base / 'birlesik'}", flush=True)
+
+
+def bosluk_turlari(plan, base, args, ilk_res, ana_notlar):
+    """N>0 ve eksik olgu varken otomatik boşluk turları (0 jeton karar + çocuk koşular). Döner: (nihai_res, hala_esik_altinda).
+
+    Maliyet güvenliği: toplam çocuk turu args.bosluk_turu'nu geçemez; her çocuk kendi --sure bütçesiyle sınırlıdır."""
+    n = args.bosluk_turu
+    if n <= 0:   # kapalı: hiçbir çocuk koşu açılmaz, mevcut akış aynen
+        return ilk_res, any(r["kapsanan"] / max(1, r["toplam"]) < kapsama.VARSAYILAN_ESIK for r in ilk_res.values())
+    guncel, onceki = ilk_res, _eksik_adlari(ilk_res)
+    kayitlar, cocuk_dirs = [], []
+    for k in range(1, n + 1):
+        ep = kapsama.eksik_plan(guncel)
+        if not ep:
+            break
+        hostlar = _ziyaret_hostlari([ana_notlar] + cocuk_dirs)
+        for item in ep:
+            item["kisitlar"] = guncelleme_kisiti(item.get("kisitlar", ""), [o["ad"] for o in item.get("olgular", [])], hostlar)
+        ep_yolu = base / f"bosluk-{k}-PLAN.json"
+        ep_yolu.write_text(json.dumps(redact_data(ep), ensure_ascii=False, indent=2), encoding="utf-8")
+        cocuk_dir = base / f"bosluk-{k}"
+        print(f"arastir: boşluk turu {k}/{n}: {len(ep)} konu, {len(onceki)} eksik olgu → {ep_yolu.name}", flush=True)
+        t0 = time.time()
+        try:
+            rc = subprocess.run(_cocuk_komut(ep_yolu, cocuk_dir, args), check=False).returncode
+        except OSError as e:
+            print(f"arastir: UYARI boşluk turu {k} başlatılamadı ({type(e).__name__}: {e}); turlar durduruldu", file=sys.stderr)
+            kayitlar.append({"tur": k, "onceki": onceki, "simdiki": onceki, "yeni": [], "rc": None,
+                             "sure": round(time.time() - t0), "neden": "çocuk koşu başlatılamadı"})
+            break
+        sure = round(time.time() - t0)
+        if rc not in (0, 73):
+            print(f"arastir: UYARI boşluk turu {k} başarısız (çıkış kodu {rc}); turlar durduruldu, eksikler elle kapatılmalı", file=sys.stderr)
+            kayitlar.append({"tur": k, "onceki": onceki, "simdiki": onceki, "yeni": [], "rc": rc, "sure": sure,
+                             "neden": f"çocuk çıkış kodu {rc}"})
+            break
+        cocuk_dirs.append(cocuk_dir / "notlar-temiz")
+        dirs = [str(ana_notlar)] + [str(d) for d in cocuk_dirs]
+        labels = ["bu çalıştırma"] + [f"bosluk-{i}" for i in range(1, len(cocuk_dirs) + 1)]
+        guncel = kapsama.run(plan, dirs, labels=labels)
+        simdiki = _eksik_adlari(guncel)
+        yeni = [a for a in onceki if a not in simdiki]
+        karar, neden = bosluk_karari(onceki, simdiki, k, n)
+        kayitlar.append({"tur": k, "onceki": onceki, "simdiki": simdiki, "yeni": yeni, "rc": rc, "sure": sure,
+                         "karar": karar, "neden": neden})
+        onceki = simdiki
+        if karar == "dur":
+            break
+    kaynaklar = [str(ana_notlar)] + [str(d) for d in cocuk_dirs]
+    (base / "bosluk-ozet.md").write_text(redact(bosluk_ozet_render(kayitlar, guncel, kaynaklar)), encoding="utf-8")
+    _birlestir(base, ana_notlar, cocuk_dirs)
+    hala_dusuk = any(r["kapsanan"] / max(1, r["toplam"]) < kapsama.VARSAYILAN_ESIK for r in guncel.values())
+    return guncel, hala_dusuk
+
+
 # ----------------------------------------------------------------------------- ana akış
+def temizle_turetilmis(base):
+    """Önceki koşudan kalan TÜRETİLMİŞ çıktıları sil (D1): bu koşunun sonucuymuş gibi görünmesinler.
+    `notlar/` (--devam istemli notları yeniden kullanır) ve `kaynaklar/` (okuma önbelleği) KORUNUR."""
+    for stale in ("destek.md", "kapsama.md", "eksik-PLAN.json", "bagimsizlik.md", "bosluk-ozet.md"):
+        (base / stale).unlink(missing_ok=True)
+    for dizin in ("notlar-temiz", "birlesik"):
+        shutil.rmtree(base / dizin, ignore_errors=True)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("plan", help="PLAN.json yolu")
@@ -859,6 +1080,9 @@ def main():
     ap.add_argument("--arama-yok", action="store_true", help="çalışma ortamının yerleşik `websearch` aracını açma (yalnız webfetch/MCP kalır)")
     ap.add_argument("--devam", action="store_true",
                     help="kesilen koşuyu sürdür: aynı istemle (özet) tamamlanmış ve sözleşmeye uyan notlar yeniden üretilmez")
+    ap.add_argument("--bosluk-turu", type=int, default=0, choices=list(range(BOSLUK_TAVAN + 1)),
+                    help=f"eksik olgular için otomatik hedefli ek çalıştırma turu (0–{BOSLUK_TAVAN}; varsayılan 0 = kapalı, geriye uyumlu). "
+                         "Her tur birleşik kapsamaya göre değerlendirilir; durgunlukta ya da tavanda durur")
     args = ap.parse_args()
 
     plan_path = Path(args.plan)
@@ -887,6 +1111,9 @@ def main():
     print(f"arastir: {len(plan)} istem yazıldı → {base}/istemler")
     if args.kuru:
         return 0
+
+    # Koşu başında önceki türetilmiş çıktıları sil (D1): erken dönüşlerde (rc=69/70/78) bile eski notlar-temiz/ kalmasın.
+    temizle_turetilmis(base)
 
     # Ön kontroller (0 token)
     try:
@@ -927,7 +1154,7 @@ def main():
         reusable = bool(prev and prev.get("ok") and prev.get("hash") == prompt_hash[slug] and note.exists())
         if reusable:
             raw_note = note.read_text(encoding="utf-8", errors="replace")
-            safe_note = redact(raw_note)
+            safe_note = redact_not(raw_note)
             safe_note, atilan = fazla_bolumleri_kes(safe_note, len(item["sorular"]))   # sondaki fazlalık yeniden koşuya yol açmasın
             if atilan:
                 prev = {**prev, "ek_bolum_atildi": atilan}
@@ -1017,6 +1244,20 @@ def main():
         if rc != 0:
             print(f"arastir: UYARI dogrula.py çıkış kodu {rc}; otomatik doğrulama YAPILMADI, iddiaları elle doğrulayın", file=sys.stderr)
             code = max(code, 72)
+    if not args.dogrula_yok and not args.link_yok:   # yayın kopyası uzlaşı sayılmaz: içerikçe aynı sayfalar tek kaynak (0 jeton; sayfalar dogrula.py önbelleğinden)
+        nd = base / "notlar-temiz" if (base / "notlar-temiz").is_dir() else base / "notlar"
+        try:
+            bres = bagimsizlik.run(nd, str(base / "kaynaklar"), files=good)
+            (base / "bagimsizlik.md").write_text(redact(bagimsizlik.render(bres)), encoding="utf-8")
+            bs = bagimsizlik.summarize(bres)
+            print("\n" + "=" * 60)
+            print(f"arastir: kaynak bağımsızlığı: {bs['okunabilir_alan_adi']} okunabilir alan adı → {bs['bagimsiz']} bağımsız kaynak "
+                  f"({bs['kopya_grubu']} kopya grubu; {bs['okunamayan']} sayfa okunamadı) → {base / 'bagimsizlik.md'}")
+            if bs["kopya_grubu"]:
+                print(f"arastir: ⚠ {bs['kopya_grubu']} kopya grubu: aynı yazının farklı alan adlarında yayımlandığı sayfalar "
+                      f"tek kaynak sayıldı; bağımsız teyit için başka yayımlayıcı ara (bkz. bagimsizlik.md)", flush=True)
+        except Exception as e:   # yardımcı denetim: hata ana akışı düşürmez
+            print(f"arastir: UYARI bagimsizlik.py çalışmadı ({type(e).__name__}: {e}); kaynak bağımsızlığı denetlenmedi", file=sys.stderr)
     if not args.dogrula_yok and not args.link_yok:   # Özet/Çıkarımlar cümlelerindeki somut öğeler alıntı/sayfalarla destekli mi (0 jeton; sayfalar dogrula.py'nin önbelleğinden gelir)
         nd = base / "notlar-temiz" if (base / "notlar-temiz").is_dir() else base / "notlar"
         try:
@@ -1034,21 +1275,25 @@ def main():
                 print(f"arastir: ⚠ {strong} somut öğe notun atıf yaptığı HİÇBİR sayfada bulunamadı (uydurma, çeviri ya da hesaplanmış değer olabilir): destek.md'deki `hiçbir-yerde` satırlarını rapora almadan kaynakta elle doğrula", flush=True)
         except Exception as e:   # yardımcı denetim: hata ana akışı düşürmez
             print(f"arastir: UYARI destek.py çalışmadı ({type(e).__name__}: {e}); Özet/Çıkarımlar cümleleri otomatik denetlenmedi", file=sys.stderr)
+    kapsama_dusuk = False
     if any(it.get("olgular") for it in plan):   # beklenen olgulara göre kapsama (0 jeton): eksikler için ek plan yazılır
         nd = base / "notlar-temiz" if (base / "notlar-temiz").is_dir() else base / "notlar"
         res = kapsama.run(plan, [nd], labels=["bu çalıştırma"], files=good)
         (base / "kapsama.md").write_text(redact(kapsama.render(res)), encoding="utf-8")
         print("\n" + "=" * 60)
         for slug, r in res.items():
-            low = r["kapsanan"] / max(1, r["toplam"]) < kapsama.VARSAYILAN_ESIK
+            if r["kapsanan"] / max(1, r["toplam"]) < kapsama.VARSAYILAN_ESIK:
+                kapsama_dusuk = True
             print(f"arastir: kapsama {slug}: {r['kapsanan']}/{r['toplam']} olgu" + (f" · eksik: {'; '.join(e['ad'] for e in r['eksik'])[:200]}" if r["eksik"] else ""))
-            if low:
-                code = max(code, 73)
         ep = kapsama.eksik_plan(res)
         if ep:
             (base / "eksik-PLAN.json").write_text(json.dumps(redact_data(ep), ensure_ascii=False, indent=2), encoding="utf-8")
             print(f"arastir: eksik olgular için ek plan: {base / 'eksik-PLAN.json'} → `arastir.py eksik-PLAN.json -d BASKA_DIZIN --hafif`, sonra "
                   f"`uzlas.py <bu>/notlar-temiz BASKA_DIZIN/notlar-temiz --yaz birlesik/` ile birleştir", flush=True)
+            if args.bosluk_turu > 0:   # otomatik boşluk turları (durgunlukta/tavanda durur; birleşik kapsama eşiği geçerse 73 nedeni düşer)
+                res, kapsama_dusuk = bosluk_turlari(plan, base, args, res, nd)
+    if kapsama_dusuk:
+        code = max(code, 73)
     if failed or weak:
         code = max(code, 73)   # kısmi başarı: bazı konular eksik ya da zayıf
     return code
