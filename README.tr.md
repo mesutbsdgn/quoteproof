@@ -108,6 +108,7 @@ Her bulgu satırında dört öğe bulunur: **iddia**, **birebir alıntı**, **bu
 | `destek.py` | Her notun **Özet ve Çıkarımlar cümlelerini** denetler: içlerindeki her somut öğe (sayı, tarih, `X25519` ya da `PEP 703` gibi tanımlayıcı, kısaltma) notun kendi alıntılarında ya da atıf yaptığı sayfalarda geçmeli; yalnız sayfada, yalnız başka sorunun sayfasında ya da hiçbir yerde olanları bildirir | 0 jeton |
 | `hakem.py` | **İsteğe bağlı, deneysel.** Alıntılarda geçen bir sayının cümlenin konusuna ait olup olmadığını küçük bir modele sorar; varsayılan kapalı, çağrı sınırlı, `judge_backend` ister | model jetonu |
 | `uzlas.py` | Aynı konunun birkaç bağımsız çalıştırmasının doğrulanmış notlarını birleştirir: hangi iddia kaç çalıştırmada bulundu, yalnız tek çalıştırmanın bulduğu ne, ve bulguları `[k/N çalıştırma]` taşıyan birleşik not | 0 jeton |
+| `kasa.py` | **Prototip.** Kalıcı, aranabilir kaynak kasası: okuyucunun önbelleğe aldığı sayfaları indeksler (SQLite FTS5, BM25), N günden eski sayfaları "yeniden doğrula" diye işaretler, aynı yazının birkaç alan adında yayımlanmış kopyasını tek kaynak sayar ve önceki koşudan "güncelleme kipi" planı yazar. Henüz `arastir.py`'ye bağlı değil | 0 jeton |
 | `rapor_olc.py` | İki raporu aynı ölçütlerle ölçer (sözcük, başlık, kaynak, boşluk) | 0 jeton |
 
 ## Özellikler

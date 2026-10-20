@@ -108,6 +108,7 @@ Each finding line carries **the claim**, **a verbatim quote**, **a URL of its ow
 | `destek.py` | Checks the **Summary and Inferences sentences** of each note: every concrete item in them (number, date, identifier such as `X25519` or `PEP 703`, acronym) must appear in the note's own quotes or on the pages it cites; reports what is only on a page, only on another question's page, or nowhere | 0 tokens |
 | `hakem.py` | **Optional, experimental.** Asks a small model whether a number that appears in the quotes belongs to the subject of the sentence; off by default, call-limited, needs `judge_backend` | model tokens |
 | `uzlas.py` | Merges the verified notes of several independent runs of the same topic: which claims were found in how many runs, what only one run found, and a merged note whose findings carry `[k/N çalıştırma]` (k of N runs) | 0 tokens |
+| `kasa.py` | **Prototype.** Persistent, searchable source vault: indexes the pages the reader cached (SQLite FTS5, BM25), flags pages older than N days for re-verification, treats the same article syndicated on several domains as one source, and writes an "update mode" plan from an earlier run. Not wired into `arastir.py` yet | 0 tokens |
 | `rapor_olc.py` | Measures two reports with the same yardstick (words, headings, sources, gaps) | 0 tokens |
 
 ## Features, explained
