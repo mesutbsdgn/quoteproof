@@ -116,8 +116,20 @@ def verified_bulgu_satirlari(path, decisions):
     return out
 
 
+def olgu_metni(finding_text):
+    """Olgu eşleşmesi için yalnız İDDİA metni + alıntı: bağlantı ADRESİ, çıplak URL ve künye parantezi çıkarılır; bağlantı METNİ ve tırnak içi alıntı kalır.
+
+    Neden: bulgu satırının TAMAMINDA aramak, "/rtx-5090-review/" gibi bir URL'yi "CUDA|RTX" olgusuna eşletirip kapsamayı olduğundan yüksek gösteriyordu (K4).
+    Doğrulanmamış satırlar zaten dışarıda; burada yalnız doğrulanmış satırın metni daraltılır.
+    """
+    t = dogrula.MD_LINK_RE.sub(r"\1", finding_text)   # [metin](adres) → metin (bağlantı metni kalır, adres düşer)
+    t = re.sub(r"https?://\S+", " ", t)               # çıplak URL
+    t = dogrula.META_TAG_RE.sub(" ", t)               # (2026-08, birincil) künyesi
+    return t
+
+
 def _eslesir(rx, satirlar):
-    return any(rx.search(s) or rx.search(dogrula.norm(s)) for s in satirlar)
+    return any(rx.search(s) or rx.search(dogrula.norm(s)) for s in (olgu_metni(x) for x in satirlar))
 
 
 def run(plan, dirs, labels=None, files=None):

@@ -94,5 +94,38 @@ class MevcutDavranisKorunur(unittest.TestCase):
             self.assertEqual(guven.score(url)["sinif"], "belirsiz", url)
 
 
+class CokKiraciliAlanAdlari(unittest.TestCase):
+    """O6 (20 Eki 2026): github.io/gitlab.io/readthedocs.io herkesin sitesi; .edu/~ kişisel sayfa. Hepsi eskiden yüksek puan alıyordu."""
+
+    def test_github_io_ve_gitlab_io_topluluk_50(self):
+        for host in ("x.github.io", "x.gitlab.io", "gist.github.io"):
+            r = guven.score(f"https://{host}/yazı")
+            self.assertEqual(r["sinif"], "topluluk", host)
+            self.assertEqual(r["puan"], 50, host)
+
+    def test_readthedocs_io_dokuman_benzeri_55(self):
+        r = guven.score("https://proje.readthedocs.io/en/latest/")
+        self.assertEqual(r["sinif"], "doküman benzeri alt alan (doğrulanmadı)")
+        self.assertEqual(r["puan"], 55)
+
+    def test_edu_taban_90_kisisel_sayfa_60(self):
+        self.assertEqual(guven.score("https://cs.example.edu/x")["puan"], 90)
+        self.assertEqual(guven.score("https://cs.example.edu/~user/x")["puan"], 60)
+
+    def test_github_com_hala_kod_deposu_65(self):
+        self.assertEqual(guven.score("https://github.com/o/r")["puan"], 65)
+        self.assertEqual(guven.score("https://gitlab.com/o/r")["puan"], 65)
+
+    def test_cok_kiracili_plan_ipucu_kok_alan_ile_arti_10(self):
+        hints = guven.hints_from_text("proje.readthedocs.io")
+        r = guven.score("https://proje.readthedocs.io/en/latest/", hints)
+        self.assertEqual(r["puan"], 55 + 10)
+        self.assertIn("planda beklenen", " ".join(r["gerekce"]))
+
+    def test_plan_ipucu_alt_alana_yayilmaz(self):
+        hints = guven.hints_from_text("proje.readthedocs.io")
+        self.assertNotIn("planda beklenen", " ".join(guven.score("https://evil.readthedocs.io/x", hints)["gerekce"]))
+
+
 if __name__ == "__main__":
     unittest.main()

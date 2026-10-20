@@ -11,8 +11,8 @@ Kullanım:
 Çıktı:
   uzlasi.md      konu başına: iddia kümeleri, kaç çalıştırmada doğrulandı, yalnız tek çalıştırmada çıkanlar, çalıştırma başına katkı
   BIRLESIK_DIZIN/<slug>.md   her kümenin temsilci bulgusu `**[k/N çalıştırma]**` önekiyle; dogrula.py/denetle.py'den yeniden geçirilebilir
-Bu bir sezgiseldir: iki bulgu "aynı iddia" sayılırsa alıntı sözcük örtüşmesi ≥0,6 ya da aynı sayfada ≥0,35 örtüşme/ortak sayıdır. Çelişkiyi (aynı konuda farklı sayı) bulmaz;
-onu koordinatör notlardan okur.
+Bu bir sezgiseldir: iki bulgu "aynı iddia" sayılırsa alıntı sözcük örtüşmesi ≥0,6 ya da aynı sayfada ≥0,35 örtüşme/ortak sayıdır. Ancak iki taraf da sayı taşıyıp ortak sayı yoksa aynı iddia sayılmaz;
+aynı sayfadan farklı sayı taşıyan ayrı kümeler birleşik notta "Çelişen/ayrı sayılar" başlığıyla işaretlenir (çelişki yine otomatik çözülmez; koordinatör okur).
 """
 import argparse
 import re
@@ -51,13 +51,18 @@ def findings(path):
             body = line.strip()[m.end():]
             ev = dogrula.evidence(body)
             quote = " ".join(ev["alinti"])
-            claim = re.sub(r"\[[^\]]*\]\([^)]*\)", "", body)
+            claim = denetle.KISMEN_ONEK_RE.sub("", re.sub(r"\[[^\]]*\]\([^)]*\)", "", body))   # "⚠ [Kısmen: …]" ön eki iddia sözcüğü sayılmaz
             out.append({"satir": line.strip(), "metin": body, "q": _toks(quote) if quote else _toks(claim),
                         "urls": {_url_key(u) for u in denetle.bullet_urls(body)}, "nums": set(ev["sayi"]), "alinti": bool(quote)})
     return out
 
 
 def same_claim(a, b):
+    # İki taraf da sayı taşıyıp ORTAK sayısı yoksa aynı iddia sayılmaz: "RTX 5090 … 290 t/s" ile "RTX 4090 … 150 t/s"
+    # aksi halde %35 sözcük örtüşmesiyle birleşip çelişki siliniyordu (O3). URL ortaklığı tek başına yetmez.
+    # Not: aynı iddianın yuvarlanmış sayıları (290 ↔ ~300) da ayrı küme olur; bu kabul edilir, koordinatör "Çelişen/ayrı sayılar" bölümünde görür.
+    if a["nums"] and b["nums"] and not (a["nums"] & b["nums"]):
+        return False
     small = max(1, min(len(a["q"]), len(b["q"])))
     ov = len(a["q"] & b["q"]) / small
     if ov >= OVERLAP_SAME:
@@ -86,6 +91,28 @@ def representative(c):
     return max(quoted, key=lambda f: len(f["q"])) if quoted else members[0]
 
 
+def _members(c):
+    return [f for fs in c.values() for f in fs]
+
+
+def conflicts(clusters):
+    """Aynı sayfayı paylaşan ama farklı/ortak olmayan sayılar taşıyan küme çiftleri (çelişki olabilecek AYRI iddialar).
+
+    O3: same_claim artık sayı taşıyan iki bulguyu ortak sayı olmadan birleştirmiyor; bunlar ayrı küme kalır ve burada
+    koordinatörün elle bakması için işaretlenir. Döner: [(küme_a, küme_b), ...]."""
+    out = []
+    for i in range(len(clusters)):
+        for j in range(i + 1, len(clusters)):
+            a, b = clusters[i], clusters[j]
+            ua = {u for f in _members(a) for u in f["urls"]}
+            ub = {u for f in _members(b) for u in f["urls"]}
+            na = {n for f in _members(a) for n in f["nums"]}
+            nb = {n for f in _members(b) for n in f["nums"]}
+            if ua & ub and na and nb and not (na & nb):
+                out.append((a, b))
+    return out
+
+
 def merge_note(slug, runs, clusters, gaps):
     n = len(runs)
     L = [f"# {slug} (birleşik, {n} çalıştırma)", "", "## Birleşik bulgular", "### Özet",
@@ -98,6 +125,12 @@ def merge_note(slug, runs, clusters, gaps):
     L += ["", "### Çıkarımlar", "- (Çalışan çıkarımları birleştirilmedi: doğrulanmamış yorumdur; koordinatör kendi çıkarımını bulgulardan yapsın.)",
           "", "### Boşluklar"]
     L += [f"- ({lab}) {g}" for lab, g in gaps] or ["- (belirtilmedi)"]
+    conf = conflicts(clusters)
+    if conf:
+        L += ["", "### Çelişen/ayrı sayılar",
+              "Aynı kaynağı paylaşan ama farklı sayı taşıyan AYRI iddialar; hangisinin doğru olduğunu koordinatör elle karşılaştırsın (çelişki otomatik çözülmez):"]
+        for a, b in conf:
+            L.append(f"- {representative(a)['metin'][:170]} ↔ {representative(b)['metin'][:170]}")
     return "\n".join(L) + "\n"
 
 
@@ -154,7 +187,7 @@ def render(res):
                 lab = next(iter(c))
                 L.append(f"- ({lab}) {representative(c)['metin'][:170]}")
         L.append("")
-    L.append("Not: iki bulgunun \"aynı iddia\" sayılması sezgiseldir (alıntı sözcük örtüşmesi / aynı sayfa + ortak sayı). Çelişki (aynı konuda farklı sayı) aranmaz; çalıştırma başına özetleri koordinatör okur.")
+    L.append("Not: iki bulgunun \"aynı iddia\" sayılması sezgiseldir (alıntı sözcük örtüşmesi / aynı sayfa + ortak sayı); sayı taşıyan iki bulgu ortak sayı paylaşmıyorsa birleştirilmez. Çelişki (aynı konuda farklı sayı) birleşik notta \"Çelişen/ayrı sayılar\" bölümüyle bildirilir ve koordinatör çalıştırma başına özetleri okur.")
     return "\n".join(L) + "\n"
 
 

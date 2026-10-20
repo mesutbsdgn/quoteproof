@@ -5,8 +5,8 @@ URL → {"puan": 0-100, "sinif": ..., "gerekce": [...]}. Şeffaf bir buluşsald�
 + (isteğe bağlı) PLAN.json `kaynaklar` ipuçları. Puan KANIT DEĞİLDİR; hangi bulguyu önce elle doğrulayacağını ve hangisinin
 tek başına rapora girmemesi gerektiğini söyleyen bir ÖNCELİK sinyalidir. İçerik doğruluğu `dogrula.py` + Claude'a aittir.
 
-Sınıflar (taban puan): resmî/standart 90 · güvenlik standardı/rehberi 88 · akademik 85 · resmî doküman 80 · ön baskı 70 · haber 70 · sektör basını 68 · teknik basın 65 (donanım/sistem basını 62) ·
-kod deposu 65 · ansiklopedi 60 · topluluk 25-55 · belirsiz 50. Sinyaller: planda beklenen kaynak +10, http −10, IP adresi −15,
+Sınıflar (taban puan): resmî/standart 90 (üniversite kişisel sayfa `/~kullanıcı` yolu 60) · güvenlik standardı/rehberi 88 · akademik 85 · resmî doküman 80 · ön baskı 70 · haber 70 · sektör basını 68 · teknik basın 65 (donanım/sistem basını 62) ·
+kod deposu 65 · ansiklopedi 60 · topluluk 25-55 · belirsiz 50 · doküman benzeri alt alan 55 (readthedocs.io gibi çok kiracılı barındırma; github.io/gitlab.io topluluk 50). Sinyaller: planda beklenen kaynak +10, http −10, IP adresi −15,
 SEO/derleme URL kalıbı −8 (tek başına "vs" teknik karşılaştırma yolu −3), şüpheli TLD −10, izleme parametresi −3.
 
 Kullanım:
@@ -36,13 +36,15 @@ CLASSES = [
     # Güvenlik standartları/rehberleri ve zafiyet kayıtları: alanın birincil referansları (OWASP, MITRE CWE/CAPEC/ATT&CK/CVE, FIRST/CVSS, CERT/CC...).
     ("güvenlik standardı/rehberi", 88, ["owasp.org", "mitre.org", "cve.org", "first.org", "cert.org", "sans.org", "cisecurity.org"]),
     ("ön baskı", 70, ["arxiv.org", "biorxiv.org", "medrxiv.org", "ssrn.com", "researchgate.net", "semanticscholar.org"]),
-    ("resmî doküman", 80, ["readthedocs.io", "readthedocs.org", "pypi.org", "npmjs.com", "crates.io", "pkg.go.dev", "docs.rs", "rubygems.org",
+    ("resmî doküman", 80, ["readthedocs.org", "pypi.org", "npmjs.com", "crates.io", "pkg.go.dev", "docs.rs", "rubygems.org",
                            "developer.mozilla.org", "learn.microsoft.com", "man7.org", "kernel.org", "python.org", "nodejs.org", "rust-lang.org",
                            "go.dev", "developer.apple.com", "developer.android.com", "cloud.google.com", "docs.aws.amazon.com", "kubernetes.io",
                            "postgresql.org", "sqlite.org",
                            # araç/ürün sahibinin kendi dokümanı ve zafiyet duyuruları (kendi ürünü hakkında birincil)
                            "portswigger.net", "msrc.microsoft.com", "security.googleblog.com", "googleprojectzero.blogspot.com"]),
-    ("kod deposu", 65, ["github.com", "gitlab.com", "codeberg.org", "bitbucket.org", "raw.githubusercontent.com", "github.io"]),
+    # Çok kiracılı doküman barındırma (readthedocs.io): herhangi bir projenin sitesi olabilir; üreticinin kendi dokümanı değildir (O6).
+    ("doküman benzeri alt alan (doğrulanmadı)", 55, ["readthedocs.io"]),
+    ("kod deposu", 65, ["github.com", "gitlab.com", "codeberg.org", "bitbucket.org", "raw.githubusercontent.com"]),
     ("ansiklopedi", 60, ["wikipedia.org", "wikimedia.org", "britannica.com"]),
     ("haber", 70, ["reuters.com", "apnews.com", "bbc.com", "bbc.co.uk", "nytimes.com", "ft.com", "economist.com", "wsj.com", "bloomberg.com",
                    "theguardian.com", "aa.com.tr", "trthaber.com"]),
@@ -62,6 +64,8 @@ CLASSES = [
     ("teknik basın", 62, ["phoronix.com", "anandtech.com", "tomshardware.com", "servethehome.com", "notebookcheck.net",
                           "techpowerup.com", "hardware-corner.net", "semianalysis.com", "chipsandcheese.com"]),
     ("topluluk", 55, ["stackoverflow.com", "stackexchange.com", "serverfault.com", "superuser.com", "askubuntu.com"]),
+    # Pages barındırma (github.io/gitlab.io): herkesin blogu/depo sayfası; kod deposu (65) değil (O6).
+    ("topluluk", 50, ["github.io", "gitlab.io"]),
     ("topluluk", 45, ["substack.com", "hashnode.dev", "gist.github.com"]),
     ("topluluk", 40, ["medium.com", "dev.to", "news.ycombinator.com", "blogspot.com", "wordpress.com", "tumblr.com", "linkedin.com"]),
     ("topluluk", 35, ["reddit.com", "youtube.com", "youtu.be", "pinterest.com", "slideshare.net"]),
@@ -84,6 +88,9 @@ TAG_GROUP = re.compile(r"\(([^()]*\b(?:birincil|ikincil)\b[^()]*)\)", re.I)
 DATE_RE = re.compile(r"(\d{4})-(\d{2})")
 URL_HINT_RE = re.compile(r"(?<![\w@])((?:[a-z0-9-]+\.)+[a-z]{2,})(/[\w./%-]*)?", re.I)
 STALE_MONTHS = 18
+# Üniversite kişisel sayfa yolu (/~kullanıcı): .edu taban puanı (90) kişisel sayfaya uygun değildir (O6).
+PERSONAL_HOME_RE = re.compile(r"^/~")
+EDU_PERSONAL_SCORE = 60
 
 
 def host_of(url):
@@ -164,6 +171,9 @@ def score(url, hints=None):
         return {"puan": 0, "sinif": "geçersiz", "gerekce": ["geçerli http(s) adresi değil"]}
     cls, points = classify(host)
     reasons.append(f"{cls} alan adı ({host})")
+    if _suffix_match(host, "edu") and PERSONAL_HOME_RE.match(parsed.path or ""):
+        points = EDU_PERSONAL_SCORE
+        reasons.append(f"üniversite kişisel sayfa yolu (~) ({EDU_PERSONAL_SCORE})")
     if is_ip(host):
         points -= 15
         reasons.append("IP adresi (−15)")
