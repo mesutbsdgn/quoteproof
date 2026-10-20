@@ -2510,6 +2510,16 @@ class DestekKontrol(unittest.TestCase):
             self.assertEqual(destek.isaretle(d, res), 0)                     # idempotent: ön ek tek kez
             self.assertEqual((Path(d) / "konu.md").read_text(encoding="utf-8").count("kaynakta bulunamadı"), 1)
 
+    def test_isaretle_madde_isaretinden_sonra_girer(self):
+        with tempfile.TemporaryDirectory() as d:
+            self._note(d, "Düz özet cümlesi burada yazıyor.", cikarim="- Ek yük yaklaşık %37 olarak ölçüldü.")
+            res = self._run(d)
+            self.assertEqual(destek.isaretle(d, res), 1)
+            text = (Path(d) / "konu.md").read_text(encoding="utf-8")
+            self.assertIn("- ⚠ [kaynakta bulunamadı: %37] Ek yük", text)
+            self.assertEqual(destek.isaretle(d, res), 0)
+            self.assertEqual((Path(d) / "konu.md").read_text(encoding="utf-8").count("kaynakta bulunamadı"), 1)
+
     def test_cikarim_ve_birim_cikti_ve_siki_cikis_kodu(self):
         with tempfile.TemporaryDirectory() as d:
             self._note(d, "Düz özet cümlesi burada yazıyor.", cikarim="- Maliyet 90 kat artar (çıkarım).")

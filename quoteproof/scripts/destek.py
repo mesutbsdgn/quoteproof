@@ -316,6 +316,7 @@ def strong_count(res):
 
 
 KAYNAKTA_YOK_ONEK = "⚠ [kaynakta bulunamadı:"
+LISTE_ONEKI_RE = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+")   # ön ek madde işaretinden SONRA girer: liste biçimi bozulmasın
 
 
 def isaretle(notes_dir, res):
@@ -351,7 +352,9 @@ def isaretle(notes_dir, res):
             if govde.startswith("## "):
                 alt = None
                 continue
-            if alt not in SECTIONS_CHECKED or line.lstrip().startswith(KAYNAKTA_YOK_ONEK):
+            liste = LISTE_ONEKI_RE.match(line)
+            bas = liste.end() if liste else 0
+            if alt not in SECTIONS_CHECKED or line[bas:].lstrip().startswith(KAYNAKTA_YOK_ONEK):
                 continue
             eslesen, n = [], 0
             for cumle, ogeler in hedef.items():
@@ -364,7 +367,7 @@ def isaretle(notes_dir, res):
             for o in eslesen:
                 if o not in birlesik:
                     birlesik.append(o)
-            lines[i] = f"⚠ [kaynakta bulunamadı: {'; '.join(birlesik)}] " + line
+            lines[i] = line[:bas] + f"⚠ [kaynakta bulunamadı: {'; '.join(birlesik)}] " + line[bas:]
             isaretlenen += n
             degisti = True
         if degisti:
