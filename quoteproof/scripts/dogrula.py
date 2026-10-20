@@ -102,6 +102,7 @@ def page_text_norm(markdown):
 CONTEXT_WINDOW = 1500      # karakter: özgün terim, doğrulanan alıntının bu kadar yakınında değilse şüphe
 CONTEXT_MAX_FREQ = 5       # sayfada en çok bu kadar geçen terim "özgün" sayılır (her yerde geçen terim kanıt değildir)
 CONTEXT_TITLE_ZONE = 400   # sayfanın ilk karakterleri (başlık/giriş): orada adı geçen konu TÜM sayfanın konusudur, "uzak" sayılmaz
+SAYI_ALINTI_PENCERE = 400  # karakter: iddianın sayısı, doğrulanan alıntı aralığının bu kadarından uzaktaysa "Kısmen" (tablo/uzun sayfalar için büyütülebilir)
 ANCHOR_RE = re.compile(r"(?<![\w-])[A-Za-z][A-Za-z0-9]*(?:-[A-Za-z0-9]+)*(?![\w-])")
 ANCHOR_STOP = set("""about above after again against also because before being between both could does doing down during each from further have having here
 into itself just more most other over same should some such than that their them then there these they this those through under until very were what when
@@ -201,10 +202,43 @@ def baglam_notu(ctx):
             "alıntı sayfada var ama iddiayla aynı konuyu anlatıyor mu, elle bak")
 
 
+def _span_mesafe(pos, spans):
+    """Bir konumun [(başlangıç, bitiş)] aralıklarına en kısa mesafesi (aralığın içindeyse 0)."""
+    best = None
+    for lo, hi in spans:
+        d = 0 if lo <= pos <= hi else min(abs(pos - lo), abs(pos - hi))
+        best = d if best is None else min(best, d)
+    return best
+
+
+def sayi_alintidan_uzak(ev, page_norm):
+    """İddianın sayılarından, sayfadaki TÜM geçişleri doğrulanan alıntı aralığından ±SAYI_ALINTI_PENCERE karakter DIŞINDA kalanlar.
+
+    Dönüş: [{"sayi", "mesafe"}] (mesafe: en yakın geçişin alıntıya uzaklığı). Alıntı sayfada bulunamadıysa ya da sayı sayfada hiç yoksa boş liste.
+    Neden: alıntı doğru olsa da iddianın sayısı sayfanın uzak bir yerinde (ör. tablo) geçiyor olabilir; sayı başka özneye ait olabilir.
+    Pencere SAYI_ALINTI_PENCERE sabitidir: tablo/uzun sayfalarda yanlış "Kısmen"i önlemek için büyütülebilir."""
+    if not ev["sayi"] or not ev["alinti"]:
+        return []
+    spans = [sp for sp in (_quote_span(page_norm, q) for q in ev["alinti"]) if sp]
+    if not spans:      # alıntı sayfada yok: mevcut davranış korunur
+        return []
+    out = []
+    for n in ev["sayi"]:
+        pos = number_positions(page_norm, n)
+        if not pos:
+            continue
+        mesafe = min(_span_mesafe(p, spans) for p in pos)
+        if mesafe > SAYI_ALINTI_PENCERE:
+            out.append({"sayi": n, "mesafe": mesafe})
+    return out
+
+
 def evidence(finding_text):
     """Maddeden kanıt dizgileri çıkarır. Alıntı/kod ham metinden (içlerindeki bağlantı/URL korunur, sayfa tarafı norm() ile aynı biçime iner);
-    sayılar kaynak bağlantıları ve künye etiketi atıldıktan sonra çıkarılır."""
-    raw = finding_text.replace('\\"', "'")      # çalışan JSON gibi \" kaçırmış olabilir (künye burada SİLİNMEZ: alıntı içindeki parantez içerik olabilir)
+    sayılar kaynak bağlantıları ve künye etiketi atıldıktan sonra çıkarılır.
+
+    `atlanan`: üst sınır (alıntı 3, kod 4, sayı 5) nedeniyle denetim DIŞINDA kalan öğe sayıları (yalnız görünürlük; karar mantığı değişmez)."""
+    raw = denetle.KISMEN_ONEK_RE.sub("", finding_text.replace('\\"', "'"))   # temiz kopya ön eki ("⚠ [Kısmen: …]") kanıt sayılmaz
     # Dış tırnak ASCII " ise içteki “ ” tırnaklar alıntıyı bölmesin; ASCII yoksa kıvrık/«» tırnaklara düş.
     quotes = _pairs(re.compile(r'"([^"]*)"'), raw) or _pairs(re.compile(r"[“«]([^“”«»]*)[”»]"), raw)
     codes = [c.strip() for c in CODE_RE.findall(raw)]
@@ -220,7 +254,9 @@ def evidence(finding_text):
             continue   # yıl-ay ("2026-06") ve yıl aralığı ("2024-2026") tarih ETİKETİDİR: sayfa "June 2026" yazar, birebir aranırsa hep "yok" çıkar
         if token and token not in GENERIC_NUMS and token not in nums:
             nums.append(token)
-    return {"alinti": quotes[:3], "kod": [c for c in codes if c not in quotes and not any(c in q for q in quotes)][:4], "sayi": nums[:5]}
+    kodlar = [c for c in codes if c not in quotes and not any(c in q for q in quotes)]
+    return {"alinti": quotes[:3], "kod": kodlar[:4], "sayi": nums[:5],
+            "atlanan": {"alinti": max(0, len(quotes) - 3), "kod": max(0, len(kodlar) - 4), "sayi": max(0, len(nums) - 5)}}
 
 
 def has_token(page_norm, token, kind):
@@ -291,8 +327,28 @@ def number_variants(t):
     return res
 
 
+def judge_detayli(ev, page_norm):
+    """(karar, bulunan, toplam, eksikler, neden). `judge` ile aynı karar; ayrıca sayı–alıntı yakınlık kapısı uygulanır:
+
+    Karar 'Doğrulandı' iken iddianın sayısı doğrulanan alıntı aralığından ±SAYI_ALINTI_PENCERE karakter dışında kalıyorsa
+    karar 'Kısmen'e düşer ve neden "sayı alıntıdan ~K kr uzak" olur (alıntı ve sayı yakınsa, alıntı bulunamadıysa davranış değişmez)."""
+    verdict, found, total, missing = judge_core(ev, page_norm)
+    if verdict == "Doğrulandı":
+        uzak = sayi_alintidan_uzak(ev, page_norm)
+        if uzak:
+            mesafe = max(u["mesafe"] for u in uzak)
+            return "Kısmen", found, total, missing, f"sayı alıntıdan ~{mesafe} kr uzak"
+    return verdict, found, total, missing, ""
+
+
 def judge(ev, page_norm):
-    """(karar, bulunan, toplam, eksikler). Eksik kanıt varken 'Doğrulandı' verilmez."""
+    """(karar, bulunan, toplam, eksikler). Eksik kanıt varken 'Doğrulandı' verilmez.
+    Sayı–alıntı yakınlık kapısı burada da uygulanır; neden metni için `judge_detayli` kullan."""
+    return judge_detayli(ev, page_norm)[:4]
+
+
+def judge_core(ev, page_norm):
+    """Sayı–alıntı yakınlık kapısı DIŞINDAKİ karar mantığı: (karar, bulunan, toplam, eksikler)."""
     items = [("alinti", q) for q in ev["alinti"]] + [("kod", c) for c in ev["kod"]] + [("sayi", n) for n in ev["sayi"]]
     if not items:
         return "Kanıt yok", 0, 0, []
@@ -422,11 +478,13 @@ def retry_transient(pages, cache_dir=None):
 def run(notes_dir, limit=0, jobs=4, cache_dir=None, files=None, hints=None):
     results = collect(notes_dir, files)
     candidates = []
+    sinir_disi = 0   # kanıt kesme sınırları (alıntı 3, kod 4, sayı 5, URL 2) nedeniyle denetlenmeyen öğe sayısı (yalnız görünürlük için)
     for r in results:
         for f in r["findings"]:
             if not f["urls"]:
                 continue
             ev = evidence(f["metin"])
+            sinir_disi += sum(ev["atlanan"].values()) + max(0, len(f["urls"]) - 2)
             strength = len(ev["alinti"]) * 3 + len(ev["kod"]) + len(ev["sayi"])
             candidates.append((strength, r["dosya"], f, ev))
     total_findings = sum(r["bulgu"] for r in results)
@@ -451,8 +509,8 @@ def run(notes_dir, limit=0, jobs=4, cache_dir=None, files=None, hints=None):
                        "neden": page["hata"] + (" (1 kez yeniden denendi)" if page.get("yeniden_denendi") else ""), "url": url}
             else:
                 page_norm = page_text_norm(page["markdown"])
-                verdict, found, total, missing = judge(ev, page_norm)
-                row = {"karar": verdict, "bulunan": found, "toplam": total, "eksik": missing, "neden": "", "url": url,
+                verdict, found, total, missing, neden = judge_detayli(ev, page_norm)
+                row = {"karar": verdict, "bulunan": found, "toplam": total, "eksik": missing, "neden": neden, "url": url,
                        "enjeksiyon_izi": bool(oku.INJECTION.search(page["markdown"]))}
                 if verdict == "Bulunamadı" and thin_page(page):
                     # sayfadan neredeyse hiç metin çıkmadı: alıntı "yok" değil, sayfa okunamadı (uydurma şüphesi etiketi haksız olurdu)
@@ -479,7 +537,7 @@ def run(notes_dir, limit=0, jobs=4, cache_dir=None, files=None, hints=None):
         rows.append({"not": name, "iddia": f["metin"], "url": f["urls"][0], "karar": "Kanıt yok", "bulunan": 0, "toplam": 0, "eksik": [],
                      "neden": "otomatik aranabilir alıntı/rakam yok", "guven": trust["puan"], "guven_sinif": trust["sinif"]})
     coverage = {"toplam_bulgu": total_findings, "url_li": with_url, "denenen": len(chosen), "kanitsiz": len(no_evidence),
-                "limit_disi": len(skipped), "urlsiz": total_findings - with_url}
+                "limit_disi": len(skipped), "urlsiz": total_findings - with_url, "sinir_disi_kanit": sinir_disi}
     return rows, coverage
 
 
@@ -495,10 +553,13 @@ def render(rows, coverage):
     counts = {}
     for r in rows:
         counts[r["karar"]] = counts.get(r["karar"], 0) + 1
-    L = ["# Otomatik iddia–kaynak doğrulaması", "",
+    kapsam = (f"Kapsam: {coverage['toplam_bulgu']} bulgudan {coverage['denenen']} tanesi kaynakta arandı; "
+              f"{coverage['kanitsiz']} kanıtsız (alıntı/rakam yok), {coverage['limit_disi']} `--en-cok` sınırı dışında, {coverage['urlsiz']} URL'siz.")
+    if coverage.get("sinir_disi_kanit"):
+        kapsam += f" {coverage['sinir_disi_kanit']} öğe sınır nedeniyle denetlenmedi (alıntı/kod/sayı üst sınırı ya da URL'lerin ilk ikisi dışı)."
+    L = [denetle.VERI_UYARISI, "", "# Otomatik iddia–kaynak doğrulaması", "",
          "Özet: " + " · ".join(f"{k} {v}" for k, v in sorted(counts.items(), key=lambda kv: -RANK[kv[0]])) + f" (toplam {len(rows)})",
-         f"Kapsam: {coverage['toplam_bulgu']} bulgudan {coverage['denenen']} tanesi kaynakta arandı; "
-         f"{coverage['kanitsiz']} kanıtsız (alıntı/rakam yok), {coverage['limit_disi']} `--en-cok` sınırı dışında, {coverage['urlsiz']} URL'siz.", "",
+         kapsam, "",
          "| Karar | Kanıt | Not | İddia | Kaynak | Güven |", "|---|---:|---|---|---|---:|"]
     for r in rows:
         claim = re.sub(r"\s+", " ", re.sub(r"\[[^\]]*\]\([^)]*\)", "", r["iddia"]))[:90]
@@ -552,15 +613,23 @@ def leftover_mentions(removed_body, kept_lines):
     return out
 
 
+def _kismen_neden(r):
+    return re.sub(r"\s+", " ", r.get("neden") or "").strip() or "kısmi kanıt"
+
+
 def clean_copies(notes_dir, rows, out_dir, files=None):
     """'Bulunamadı' bulguların maddelerini çıkarıp temiz not kopyaları yazar (sentez girdisi). Orijinal notlara dokunmaz.
-    Döner: {dosya: çıkarılan madde sayısı}. Çıkarılanlar out_dir/DISLANAN.md'ye yazılır."""
+    'Kısmen' bulgu satırlarının başına (madde işaretinden SONRA, idempotent) "⚠ [Kısmen: <neden>] " ön eki girer; sentez modeli bunları
+    Doğrulandı'dan ayırt edebilsin. Döner: {dosya: çıkarılan madde sayısı}. Çıkarılanlar out_dir/DISLANAN.md'ye yazılır."""
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
-    drop = {}
+    drop, partial = {}, {}
     for r in rows:
+        key = re.sub(r"\s+", " ", r["iddia"]).strip()
         if r["karar"] == "Bulunamadı":
-            drop.setdefault(r["not"], set()).add(re.sub(r"\s+", " ", r["iddia"]).strip())
+            drop.setdefault(r["not"], set()).add(key)
+        elif r["karar"] == "Kısmen":
+            partial.setdefault(r["not"], {})[key] = _kismen_neden(r)
     dropped, report = {}, ["# Sentezden çıkarılan bulgular (alıntı kaynakta bulunamadı)", ""]
     for p in sorted(Path(notes_dir).glob("*.md")):
         if files and p.name not in set(files):
@@ -568,11 +637,18 @@ def clean_copies(notes_dir, rows, out_dir, files=None):
         kept, n = [], 0
         for line in p.read_text(encoding="utf-8", errors="replace").splitlines():
             m = denetle.BULLET_RE.match(line.strip())
-            body = re.sub(r"\s+", " ", line.strip()[m.end():]).strip() if m else None
+            body = denetle.KISMEN_ONEK_RE.sub("", line.strip()[m.end():]).strip() if m else None   # ön ek eşleşmeyi bozmasın
+            body = re.sub(r"\s+", " ", body).strip() if body else None
             if body and body in drop.get(p.name, ()):
                 n += 1
                 report.append(f"- `{p.name}` — {body[:160]}")
                 continue
+            neden = partial.get(p.name, {}).get(body) if body else None
+            if neden:
+                off = len(line) - len(line.lstrip())   # ön ek madde işaretinden SONRA girer: liste biçimi bozulmasın
+                bas = off + m.end()
+                if not denetle.KISMEN_ONEK_RE.match(line[bas:]):   # idempotent: zaten işaretliyse dokunma
+                    line = line[:bas] + f"⚠ [Kısmen: {neden}] " + line[bas:]
             kept.append(line)
         (out / p.name).write_text("\n".join(kept) + "\n", encoding="utf-8")
         dropped[p.name] = n

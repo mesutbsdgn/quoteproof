@@ -222,6 +222,7 @@ def _norm(text):
 
 def _line_search_text(line):
     body = denetle.BULLET_RE.sub("", line.strip())
+    body = denetle.KISMEN_ONEK_RE.sub("", body)   # temiz kopyadaki "⚠ [Kısmen: …]" ön eki aranan metne girmez
     body = dogrula.META_TAG_RE.sub(" ", body)
     return _norm(_strip_links(body))
 
@@ -377,7 +378,7 @@ def isaretle(notes_dir, res):
 
 def render(res):
     c = summarize(res)
-    L = ["# İddia–kanıt destek kontrolü (Özet ve Çıkarımlar cümleleri)", "",
+    L = [denetle.VERI_UYARISI, "", "# İddia–kanıt destek kontrolü (Özet ve Çıkarımlar cümleleri)", "",
          f"Özet: {c['cumle']} cümleden **{c['isaretli']}** tanesinde somut öğe (sayı, tarih, tanımlayıcı, kısaltma) alıntılarda yok: **{c['uyarı']} uyarı · {c['bilgi']} bilgi**.",
          "", "Katmanlar: `hiçbir-yerde` = notun atıf yaptığı hiçbir sayfada yok (güçlü) · `başka-sayfada` = yalnız notun başka sorusunun sayfasında var · "
          "`sayfada` = alıntıda yok ama bu sorunun sayfasında var (kanıt alıntıya taşınmamış). Yalnız somut öğeleri sınar; cümlenin anlamının kaynakla örtüştüğünü söylemez. "

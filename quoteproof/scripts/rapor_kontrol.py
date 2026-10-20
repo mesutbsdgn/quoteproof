@@ -13,8 +13,10 @@ Bu araç NİHAİ raporu (Markdown) öğelere böler (tablo satırı · madde · 
 
 Sezgisel ve kanıt değildir: "temiz" çıktı raporun doğru olduğu anlamına gelmez, yalnız bu hata sınıflarının görülmediğini söyler.
 
-Kullanım: rapor_kontrol.py RAPOR.md [--notlar DIZIN] [--onbellek DIZIN] [--plan PLAN.json] [--cikti kontrol.md] [--is 4] [--siki]
-  --siki  hata ya da uyarı varsa çıkış kodu 1 (CI/sentez kapısı); varsayılan 0.
+Kullanım: rapor_kontrol.py RAPOR.md [--notlar DIZIN] [--onbellek DIZIN] [--plan PLAN.json] [--cikti kontrol.md] [--is 4] [--havuz N] [--siki]
+  --havuz  havuza alınacak en çok sayfa (varsayılan 120). Sınırı aşan her URL "kaynak-okunamadı (havuz sınırı)" uyarısı üretir; sessizce atlanmaz.
+           Sayfa okuma maliyeti O(havuz): her sayfa bir kez çekilir (0 LLM jetonu, yalnız ağ); büyük havuz ilk koşuyu yavaşlatır (önbellekle sonrakiler hızlı).
+  --siki   hata ya da uyarı varsa çıkış kodu 1 (CI/sentez kapısı); varsayılan 0 (havuz sınırı uyarısı da bu kapıyı düşürür).
 """
 import argparse
 import json
@@ -33,7 +35,7 @@ import oku  # noqa: E402
 
 BULLET = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+")
 TABLE_SEP = re.compile(r"^\|?[\s:|-]+\|?$")
-MAX_POOL = 60          # raporun atıf yaptığı en çok bu kadar sayfa havuza alınır
+MAX_POOL = 120         # raporun atıf yaptığı en çok bu kadar sayfa havuza alınır (--havuz ile değişir; aşan URL'ler uyarı üretir)
 SEV_ORDER = {"hata": 0, "uyarı": 1, "bilgi": 2}
 
 
@@ -231,12 +233,14 @@ def add_url_scheme(text):
     return re.sub(r"(?<!\])\((https?://)", r"( \1", text)   # "(https://x)": araç yalnız [metin](url) ve boşlukla ayrılmış çıplak adresleri okur
 
 
-def run(report_text, cache_dir=None, notes_urls=None, hints=None, jobs=4, loader=None):
+def run(report_text, cache_dir=None, notes_urls=None, hints=None, jobs=4, loader=None, max_pool=MAX_POOL):
     loader = loader or (lambda u: oku.load(u, cache_dir=cache_dir))
     items = parse_items(add_url_scheme(report_text))
     item_urls = [[u.rstrip(".,;)") for u in denetle.bullet_urls(it["metin"])] for it in items]
-    all_urls = list(dict.fromkeys(u for urls in item_urls for u in urls))[:MAX_POOL]
-    note_only = [u for u in dict.fromkeys(notes_urls or []) if u not in all_urls][:MAX_POOL]   # yalnız "terim başka sayfada geçiyor mu" için
+    tum_urls = list(dict.fromkeys(u for urls in item_urls for u in urls))
+    all_urls = tum_urls[:max_pool]
+    pool_disi = tum_urls[max_pool:]                                                             # havuza girmeyen: sessizce atlanmaz, uyarı üretir
+    note_only = [u for u in dict.fromkeys(notes_urls or []) if u not in all_urls][:max_pool]   # yalnız "terim başka sayfada geçiyor mu" için
     pool = {}
     with ThreadPoolExecutor(max_workers=max(1, jobs)) as ex:
         for u, page in zip(all_urls + note_only, ex.map(loader, all_urls + note_only)):
@@ -256,6 +260,10 @@ def run(report_text, cache_dir=None, notes_urls=None, hints=None, jobs=4, loader
     for u in unreadable:
         extra.append(_finding("uyarı", "kaynak-okunamadı",
                               f"atıf yapılan kaynak okunamadı; bu URL'ye bağlı alıntı ve sayılar denetlenemedi: {u}"))
+    for u in pool_disi:
+        extra.append(_finding("uyarı", "kaynak-okunamadı (havuz sınırı)",
+                              f"havuz sınırı ({max_pool}) aşıldı; bu URL hiç okunmadı ve ona bağlı iddialar denetlenmedi: {u} "
+                              f"(--havuz {max_pool + len(pool_disi)} ile tümü okunur)"))
     if notes_urls is not None:
         known = {normalize_url(u) for u in notes_urls}
         for u in all_urls:
@@ -268,7 +276,8 @@ def run(report_text, cache_dir=None, notes_urls=None, hints=None, jobs=4, loader
         score = guven.score(u, hints)
         if score["puan"] < 50:
             extra.append(_finding("bilgi", "zayıf-kaynak", f"zayıf kaynak ({score['sinif']}, {score['puan']}): {u}"))
-    return {"ogeler": results, "ekstra": extra, "url_sayisi": len(all_urls), "okunamayan": unreadable, "oge_sayisi": len(items)}
+    return {"ogeler": results, "ekstra": extra, "url_sayisi": len(tum_urls), "havuz_disi_sayisi": len(pool_disi),
+            "okunamayan": unreadable, "oge_sayisi": len(items)}
 
 
 def summarize(res):
@@ -283,8 +292,9 @@ def summarize(res):
 
 def render(res, rapor_adi):
     c = summarize(res)
+    havuz = f", {res['havuz_disi_sayisi']} tanesi havuz sınırı dışında (denetlenmedi)" if res.get("havuz_disi_sayisi") else ""
     L = [f"# Rapor düzeyi kaynak kontrolü — {rapor_adi}", "",
-         f"Özet: **{c['hata']} hata · {c['uyarı']} uyarı · {c['bilgi']} bilgi** ({res['oge_sayisi']} öğe, {res['url_sayisi']} benzersiz kaynak, "
+         f"Özet: **{c['hata']} hata · {c['uyarı']} uyarı · {c['bilgi']} bilgi** ({res['oge_sayisi']} öğe, {res['url_sayisi']} benzersiz kaynak{havuz}, "
          f"{len(res['okunamayan'])} sayfa okunamadı).",
          "", "Sezgiseldir: temiz çıktı raporun doğru olduğunu değil, bu hata sınıflarının görülmediğini söyler. "
          "Not düzeyindeki doğrulama (`dogrula.py`) sentezde doğan sayı–özne atıf hatalarını göremez; bu araç onların bir kısmını yakalar.", ""]
@@ -316,6 +326,8 @@ def main():
     ap.add_argument("--plan", help="PLAN.json (kaynak güven puanı ipuçları)")
     ap.add_argument("--cikti", help="kontrol raporunun yazılacağı dosya (varsayılan: rapor dizini/rapor-kontrol.md)")
     ap.add_argument("--is", dest="jobs", type=int, default=4)
+    ap.add_argument("--havuz", type=int, default=MAX_POOL, help=f"havuza alınacak en çok sayfa (varsayılan {MAX_POOL}); sınırı aşan URL'ler "
+                                                               "kaynak-okunamadı (havuz sınırı) uyarısı üretir")
     ap.add_argument("--siki", action="store_true", help="hata ya da uyarı varsa çıkış kodu 1")
     a = ap.parse_args()
     path = Path(a.rapor)
@@ -329,7 +341,7 @@ def main():
         notes_urls = [u for p in sorted(Path(a.notlar).glob("*.md")) for u in denetle.analyze(p)["urls"]]
     hints = guven.hints_by_slug(a.plan).get("*") if a.plan else None
     cache = a.onbellek or str(path.parent / "kaynaklar")
-    res = run(text, cache_dir=cache, notes_urls=notes_urls, hints=hints, jobs=a.jobs)
+    res = run(text, cache_dir=cache, notes_urls=notes_urls, hints=hints, jobs=a.jobs, max_pool=max(1, a.havuz))
     report = render(res, path.name)
     out = Path(a.cikti) if a.cikti else path.parent / "rapor-kontrol.md"
     out.write_text(report + "\n", encoding="utf-8")
