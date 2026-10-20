@@ -10,7 +10,7 @@
 <p align="center">
   <a href="README.md">English</a> · <a href="README.tr.md">Türkçe</a>
   &nbsp;|&nbsp;
-  <a href="https://github.com/mesutbsdgn/quoteproof/tree/v1.5"><img alt="sürüm" src="https://img.shields.io/badge/s%C3%BCr%C3%BCm-v1.5-blue"></a>
+  <a href="https://github.com/mesutbsdgn/quoteproof/tree/v1.6"><img alt="sürüm" src="https://img.shields.io/badge/s%C3%BCr%C3%BCm-v1.6-blue"></a>
   <img alt="lisans" src="https://img.shields.io/badge/lisans-AGPL--3.0-blue">
   <img alt="python" src="https://img.shields.io/badge/python-3.9%2B-informational">
   <img alt="bağımlılık" src="https://img.shields.io/badge/ba%C4%9F%C4%B1ml%C4%B1l%C4%B1k-yok-success">
@@ -344,7 +344,7 @@ Yazarın denemelerinde küçük bir konu, alt ajan başına yaklaşık 30 saniye
 - Güven puanı, alan adları ve URL biçimleri üzerine elle yazılmış bir sezgisel yöntemdir; alışılmadık siteleri yanlış sıralayabilir. Yalnızca öncelik belirlemek için kullanın.
 - Alt ajanlar için, LLM sağlayıcınıza bağlanmış hazır bir ajan ortamı gerekir; proje ortama yalnızca hangi model kimliklerini ve anahtar değişkenini kullanacağını bildirir. Farklı bir ortam için `scripts/arastir.py` dosyasına yeni bir arka uç işlevi eklemek gerekir.
 - **Güvenlik sınırı özel CLI arka ucunu kapsamaz.** Varsayılanı "yasak" olan araç izinleri yalnızca OpenCode için tanımlıdır. Özel CLI yalnızca izin verilen ortam değişkenleriyle çalıştırılır ve `api_key_env` anahtarı bu yoldan aktarılmaz. Ortam değişkenlerini süzmek, CLI'ın dosya sistemine ya da ağa erişimini kısıtlamaz. Güvenmediğiniz bir CLI'ı kendi izolasyonunuzda (kapsayıcı, ayrı kullanıcı) çalıştırın.
-- **Gizli bilgi maskeleme sınırlıdır.** Basit bir kalıpla yalnızca hata metinlerindeki bazı anahtar benzeri değerler maskelenir. Alt ajan çıktısı, özel CLI yolu dahil, olduğu gibi not dosyasına yazılır; genel bir temizleme garantisi yoktur. `denetle.py`, `gh` alt sürecini ana sürecin ortamıyla çalıştırır.
+- **Gizli bilgi maskeleme sınırlıdır.** Basit bir kalıpla yalnızca hata metinlerindeki ve günlüklerdeki bazı anahtar benzeri değerler maskelenir. Notlar bilerek dar bir maskeyle yazılır (`sk-`, `ghp_`, `AKIA` gibi bilinen anahtar önekleri, JWT, `Bearer` belirteçleri ve `api_key=…` türü birleşik atamalar); böylece "time to first token" gibi düz yazı bozulmaz. Genel bir temizleme garantisi yoktur. `denetle.py`, `gh` alt sürecini ana sürecin ortamıyla çalıştırır.
 - Yalnızca JavaScript ile yüklenen sayfalar tarayıcı olmadan okunamaz. Üçüncü taraf bir okuyucu seçeneği (`--jina`) vardır, ama URL'yi üçüncü tarafa gönderdiği için isteğe bağlıdır ve alt ajanlar bunu hiçbir zaman kullanmaz.
 - Okuyucu proxy kullanmaz ve DNS'i kendisi çözer. Yalnızca proxy üzerinden dışarı çıkılabilen ortamlarda çevrimiçi okuma ve alıntı doğrulama çalışmaz; çevrimdışı birim testleri etkilenmez.
 - Alt ajan istemleri, notlar ve raporlar varsayılan olarak Türkçedir (alıntılar kaynağın dilinde kalır).
@@ -359,11 +359,14 @@ Yazarın denemelerinde küçük bir konu, alt ajan başına yaklaşık 30 saniye
 ## Testler
 
 ```bash
-python3 quoteproof/scripts/test_arastir.py   # 241 test: ayrıştırma, sözleşme, devam, doğrulama, güven puanı, yapılandırma, MCP sunucusu
-python3 quoteproof/scripts/test_oku.py       # 57 test: ayıklama, BM25, önbellek, SSRF, yönlendirme, robots.txt, PDF
+cd quoteproof/scripts
+python3 -m unittest test_arastir test_oku test_dogrulama_ek test_kapsama_uzlas test_kasa test_bagimsizlik test_guven test_anlam   # 445 test
+#   test_arastir (283): ayrıştırma, sözleşme, devam, boşluk turu, maskeleme, CLI ölçümü, güven puanı, yapılandırma, MCP sunucusu
+#   test_oku (57): ayıklama, BM25, önbellek, SSRF, yönlendirme, robots.txt, PDF
+#   test_dogrulama_ek (21) · test_kapsama_uzlas (12) · test_kasa (12) · test_bagimsizlik (9) · test_guven (19) · test_anlam (32)
 ```
 
-İki set de ağ erişimi olmadan çalışır.
+`test_oku_saldirgan.py` okuyucu için saldırgan girdi senaryolarını içerir (pytest biçimi, `xfail` işaretli). Tüm setler ağ erişimi olmadan çalışır; NLI testleri modeli taklit eder, çalıştırmak için model gerekmez.
 
 ## Depo yapısı
 
@@ -372,16 +375,24 @@ quoteproof/            skill (~/.claude/skills/ altına kopyalayın ya da bağla
 ├── SKILL.md              koordinatör talimatları (Türkçe)
 ├── quoteproof.example.json   yapılandırma şablonu (~/.config/quoteproof/config.json olarak kopyalayın)
 ├── references/           alt ajan istemi, rapor şablonu, tasarımın dayandığı notlar
-└── scripts/              arastir · denetle · dogrula · destek · hakem · rapor_kontrol · oku · mcp_oku · guven · rapor_olc · ayar  (+ testler)
+└── scripts/              arastir · denetle · dogrula · destek · hakem · anlam · kapsama · uzlas · kasa · bagimsizlik · rapor_kontrol · oku · mcp_oku · guven · rapor_olc · ayar  (+ testler)
 assets/                   logo
 docs/fact-check/          bu README'nin doğrulaması (aşağıya bakın)
 ```
 
 ## Sürüm notları
 
-v1.0–v1.5 etiketli sürümler [GitHub Releases](https://github.com/mesutbsdgn/quoteproof/releases) sayfasındadır. Ayrıntılı geliştirme geçmişi aşağıda yer alır. Ölçümlerin ayrıntısı kapatılmış [issue'lardadır](https://github.com/mesutbsdgn/quoteproof/issues?q=is%3Aissue+is%3Aclosed).
+v1.0–v1.6 etiketli sürümler [GitHub Releases](https://github.com/mesutbsdgn/quoteproof/releases) sayfasındadır. Ayrıntılı geliştirme geçmişi aşağıda yer alır. Ölçümlerin ayrıntısı kapatılmış [issue'lardadır](https://github.com/mesutbsdgn/quoteproof/issues?q=is%3Aissue+is%3Aclosed).
 
 ### Ayrıntılı geliştirme geçmişi
+
+- **v1.6 — doğrulama kapıları, ölçülen CLI alt ajanları, isteğe bağlı anlam denetimi.**
+  - *Düzeltme:* notlar için kullanılan gizli bilgi maskesi sıradan sözcükleri yutuyordu ("Her token için fiyat" → "token [GİZLİ] fiyat"); alıntılar bozuluyor ve yanlış `Bulunamadı` kararları çıkıyordu. Notlar artık dar bir maske kullanır (`redact_not`); geniş maske günlük ve hata metinlerinde kalır. Aynı plan üzerinde yerel önce/sonra koşusunda bulunamadı sayısı 23'ten 12'ye indi (koşu kayıtları bu depoda yoktur).
+  - *Doğrulama:* sayfada geçen ama doğrulanan alıntıdan uzak bir sayı artık `Doğrulandı` kararını `Kısmen`'e düşürür (`dogrula.py`, pencere `SAYI_ALINTI_PENCERE=400`); `Kısmen` satırları `notlar-temiz/` içinde `⚠ [Kısmen: …]` ile işaretlenir; sayıları hiçbir atıf sayfasında bulunmayan cümleler `⚠ [kaynakta bulunamadı: …]` ile işaretlenir (`destek.py --isaretle`); `rapor_kontrol.py` sayfa havuzunu aşan atıfları artık sessizce atlamaz (`--havuz`, uyarı sınıfı, `--siki` başarısız olur); kapsama plan olgularını URL'ye değil yalnız iddia ve alıntıya karşı arar; uzlaşı birleştirmesi farklı sayı taşıyan bulguları artık birleştirmez, *Çelişen/ayrı sayılar* altında listeler; çok kiracılı alan adları (`github.io`, `readthedocs.io`, `.edu/~kullanıcı`) artık kurum gibi puanlanmaz.
+  - *CLI alt ajanları:* `cli_backend.format` değerine `claude-stream-json` (jeton, maliyet, araç sayısı; gerçek bir `claude -p` koşusuyla doğrulandı) ve `codex-jsonl` (belgelenmiş biçim, **gerçek Codex CLI ile test edilmedi**) eklendi.
+  - *Hat:* `--bosluk-turu N` (0–3, varsayılan kapalı) eksik plan olguları için hedefli ek turlar koşar ve durgunlukta durur; `bagimsizlik.py` yayın kopyalarını tek kaynak sayar; `kasa.py` (prototip kaynak kasası, SQLite FTS5) kanonik URL anahtarlarıyla; `olgular` listeleri konular arasında aynı olan plan artık uyarı verir; koşu başında eski türetilmiş çıktılar temizlenir; sondaki fazladan `##` bölümü sözleşmeyi bozmak yerine kesilir; "plan modu" konulu not artık plan metni sayılıp reddedilmez.
+  - *İsteğe bağlı anlam denetimi:* `anlam.py` (`--anlam`) iddia–pasaj gerektirme (entailment) puanını çok dilli bir NLI modeliyle (`mDeBERTa-v3-base-xnli`, MIT) **ayrı bir sanal ortamda** hesaplar (`scripts/anlam_kur.sh`, ≈1,5 GB, elle çalıştırılır). Yalnız işaretler ve sıralar (`⚠ [Anlam zayıf: …]`); kararlar değişmez. 198 doğrulanmış bulguda ölçüm: entailment < 0,10 eşiği gerçek çiftlerin %13'ünü, karıştırılmış çiftlerin %46'sını işaretledi; kanıt değil, öncelik sinyalidir. Çekirdek hat bağımlılıksız kalır.
+  - 445 çevrimdışı birim testi geçiyor.
 
 - **Lisans MIT'ten GNU AGPL-3.0'a geçti.** Önceki commit'ler (`2fa793e` dahil) MIT Lisansı altında erişilebilir kalır.
 - README yeniden yazıldı; Türkçe metin sadeleştirildi. Arama yapan modellere artık *alt ajan* deniyor, çünkü *çalışan* insan personeli akla getiriyordu; "run" için "çalıştırma" yerine "çalıştırma/deneme" kullanıldı; iki başlık yeniden yazıldı.

@@ -10,7 +10,7 @@
 <p align="center">
   <a href="README.md">English</a> · <a href="README.tr.md">Türkçe</a>
   &nbsp;|&nbsp;
-  <a href="https://github.com/mesutbsdgn/quoteproof/tree/v1.5"><img alt="version" src="https://img.shields.io/badge/version-v1.5-blue"></a>
+  <a href="https://github.com/mesutbsdgn/quoteproof/tree/v1.6"><img alt="version" src="https://img.shields.io/badge/version-v1.6-blue"></a>
   <img alt="license" src="https://img.shields.io/badge/license-AGPL--3.0-blue">
   <img alt="python" src="https://img.shields.io/badge/python-3.9%2B-informational">
   <img alt="dependencies" src="https://img.shields.io/badge/dependencies-none-success">
@@ -338,7 +338,7 @@ In the author's runs, a small topic takes about 30 seconds per worker, and the a
 - Trust scoring is a hand-written heuristic over domains and URL shapes; it will mis-rank unusual sites. Treat it as a triage hint.
 - Workers need an agent runtime that is already set up with your LLM provider; this project only tells it which model ids and key variable to use. A different runtime needs a new back-end function in `scripts/arastir.py`.
 - **The safety boundary does not cover a custom CLI back-end.** The deny-by-default tool permissions exist only for OpenCode. A custom CLI runs with an allow-listed environment and does not receive the `api_key_env` key; filtering environment variables does not restrict its file-system or network access. Run a CLI you do not trust in your own isolation (container, separate user).
-- **Secret masking is limited.** A simple pattern masks only some key-like values in error text. Worker output, including the custom-CLI path, is written to the note file as is; there is no general sanitising guarantee. `denetle.py` runs the `gh` subprocess with the parent process's environment.
+- **Secret masking is limited.** A simple pattern masks only some key-like values in error text and logs. Notes are written with a deliberately narrow mask (known key prefixes such as `sk-` / `ghp_` / `AKIA`, JWTs, `Bearer` tokens and compound `api_key=…` style assignments) so that ordinary prose such as "time to first token" is left intact; there is no general sanitising guarantee. `denetle.py` runs the `gh` subprocess with the parent process's environment.
 - JavaScript-only pages cannot be read without a browser. A third-party reader option exists (`--jina`) but it sends the URL to a third party, so it is opt-in and never used by workers.
 - Worker prompts, notes and reports are Turkish by default (quotes stay in the source language).
 - The reader uses no proxy and resolves DNS itself. In an environment where traffic can leave only through a proxy, online reading and quote verification do not work; the offline unit tests are unaffected.
@@ -353,11 +353,14 @@ In the author's runs, a small topic takes about 30 seconds per worker, and the a
 ## Tests
 
 ```bash
-python3 quoteproof/scripts/test_arastir.py   # 241 tests: parsing, contract, resume, verification, trust score, config, MCP server
-python3 quoteproof/scripts/test_oku.py       # 57 tests: extraction, BM25, cache, SSRF, redirects, robots.txt, PDF
+cd quoteproof/scripts
+python3 -m unittest test_arastir test_oku test_dogrulama_ek test_kapsama_uzlas test_kasa test_bagimsizlik test_guven test_anlam   # 445 tests
+#   test_arastir (283): parsing, contract, resume, gap rounds, redaction, CLI metering, trust score, config, MCP server
+#   test_oku (57): extraction, BM25, cache, SSRF, redirects, robots.txt, PDF
+#   test_dogrulama_ek (21) · test_kapsama_uzlas (12) · test_kasa (12) · test_bagimsizlik (9) · test_guven (19) · test_anlam (32)
 ```
 
-Both suites run without network access.
+`test_oku_saldirgan.py` holds adversarial reader cases (pytest-style, `xfail` markers). All suites run without network access; the NLI tests mock the model, so no model is needed to run them.
 
 ## Repository layout
 
@@ -366,16 +369,24 @@ quoteproof/            the skill (copy or symlink into ~/.claude/skills/)
 ├── SKILL.md              coordinator instructions (Turkish)
 ├── quoteproof.example.json   configuration template (copy to ~/.config/quoteproof/config.json)
 ├── references/           worker prompt, report template, notes behind the design
-└── scripts/              arastir · denetle · dogrula · destek · hakem · rapor_kontrol · oku · mcp_oku · guven · rapor_olc · ayar  (+ tests)
+└── scripts/              arastir · denetle · dogrula · destek · hakem · anlam · kapsama · uzlas · kasa · bagimsizlik · rapor_kontrol · oku · mcp_oku · guven · rapor_olc · ayar  (+ tests)
 assets/                   logo
 docs/fact-check/          the fact-check of this README (see below)
 ```
 
 ## Release notes
 
-Tagged releases v1.0–v1.5 are listed in [GitHub Releases](https://github.com/mesutbsdgn/quoteproof/releases). The detailed development history follows below. Measurements are documented in the [closed issues](https://github.com/mesutbsdgn/quoteproof/issues?q=is%3Aissue+is%3Aclosed).
+Tagged releases v1.0–v1.6 are listed in [GitHub Releases](https://github.com/mesutbsdgn/quoteproof/releases). The detailed development history follows below. Measurements are documented in the [closed issues](https://github.com/mesutbsdgn/quoteproof/issues?q=is%3Aissue+is%3Aclosed).
 
 ### Detailed development history
+
+- **v1.6 — verification gates, measured CLI workers, optional meaning check.**
+  - *Fix:* the secret mask used for notes swallowed ordinary words ("Her token için fiyat" → "token [GİZLİ] fiyat"), which corrupted quotes and produced false `Bulunamadı` verdicts. Notes now use a narrow mask (`redact_not`); the broad mask remains for logs and errors. In a local before/after run on the same plan the not-found count fell from 23 to 12 (the run records are not part of this repository).
+  - *Verification:* a number that appears on the page but far from the verified quote now downgrades `Doğrulandı` to `Kısmen` (`dogrula.py`, window `SAYI_ALINTI_PENCERE=400`); `Kısmen` lines are marked `⚠ [Kısmen: …]` in `notlar-temiz/`; sentences whose figures appear on no cited page are marked `⚠ [kaynakta bulunamadı: …]` (`destek.py --isaretle`); `rapor_kontrol.py` no longer drops citations beyond its page pool silently (`--havuz`, warning class, `--siki` fails); coverage matches plan facts against the claim and quote only, not URLs; the consensus merge no longer fuses findings that carry different numbers and lists them under *Çelişen/ayrı sayılar*; multi-tenant hosts (`github.io`, `readthedocs.io`, `.edu/~user`) no longer score as institutions.
+  - *CLI workers:* `cli_backend.format` gains `claude-stream-json` (tokens, cost, tool counts; verified against a real `claude -p` run) and `codex-jsonl` (documented format, **not tested against a real Codex CLI**).
+  - *Pipeline:* `--bosluk-turu N` (0–3, off by default) runs targeted follow-up rounds for missing plan facts and stops on stagnation; `bagimsizlik.py` counts syndicated copies as one source; `kasa.py` (prototype source vault, SQLite FTS5) with canonical URL keys; a plan whose `olgular` lists are identical across topics now warns; stale derived outputs are cleared at the start of a run; an extra trailing `##` section is trimmed instead of failing the contract; a note about "plan mode" is no longer rejected as a plan.
+  - *Optional meaning check:* `anlam.py` (`--anlam`) scores claim-vs-passage entailment with a multilingual NLI model (`mDeBERTa-v3-base-xnli`, MIT) in a **separate virtual environment** (`scripts/anlam_kur.sh`, ≈1.5 GB, run by hand). It only marks and ranks (`⚠ [Anlam zayıf: …]`); verdicts do not change. Measured on 198 verified findings: entailment < 0.10 flagged 13% of true pairs and 46% of shuffled pairs; it is a triage signal, not proof. The core pipeline stays dependency-free.
+  - 445 offline unit tests pass.
 
 - **License changed from MIT to GNU AGPL-3.0.** Earlier commits (up to `2fa793e`) stay available under the MIT License.
 - README rewritten; the Turkish text was simplified. In Turkish the search models are now called *alt ajan* (sub-agent) because *çalışan* means a human employee; "run" is now *çalıştırma/deneme*, not *koşu*; two headings were reworded.
