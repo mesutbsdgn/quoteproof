@@ -181,6 +181,7 @@ def render(item, template, okuma=OKUMA_GENEL, hafif=False):
     numbered = "\n".join(f"{i}. {s.strip()}" for i, s in enumerate(sorular, 1)) or "1. (belirtilmedi — konuyu kapsamlı ele al)"
     values = {
         "konu": item["konu"].strip(),
+        "soru_sayisi": str(len(sorular) or 1),
         "amac": item.get("amac", "").strip() or "Konuyu kaynaklı ve doğrulanabilir biçimde özetle.",
         "sorular": numbered,
         "kaynaklar": item.get("kaynaklar", "").strip() or "resmî dokümanlar, birincil kaynaklar, güvenilir yayınlar",
@@ -248,6 +249,32 @@ def validate(plan):
         if "min_url_required" in item and not (isinstance(item["min_url_required"], int) and not isinstance(item["min_url_required"], bool) and MIN_URLS_REQUIRED_MIN <= item["min_url_required"] <= 30):
             errors.append(f"#{i}: 'min_url_required' {MIN_URLS_REQUIRED_MIN} ile 30 arasında tam sayı olmalı (varsayılan kabul eşiği {MIN_URLS})")
     return errors
+
+
+# Konu bazlı yazılmamış olgu listesi uyarısı. Hata değil: çıkış kodunu değiştirmez, yalnız stderr'e yazılır.
+OLGULAR_AYNI_UYARI = "olgular konular arasında aynı; kapsama anlamsız düşük çıkar — her konuya yalnız o konunun olgularını yaz"
+
+
+def plan_uyarilari(plan):
+    """Plan doğrulamasından AYRI uyarılar: birden çok konunun `olgular` listesi birebir aynıysa kapsama ölçümü bozulur.
+
+    Aynı olgu listesini her konuya kopyalamak (konu bazlı yazmamak) her konuda diğer konuların olgularını da arar; kapsama
+    yapay olarak düşük/ıskalı çıkar. Dönen metinler main'de stderr'e yazılır; validate'in dönüşü ve çıkış kodu değişmez."""
+    if not isinstance(plan, list) or len(plan) < 2:
+        return []
+    gruplar = {}
+    for item in plan:
+        if not isinstance(item, dict):
+            continue
+        try:
+            facts = kapsama.olgulari_oku(item)
+        except kapsama.OlguHatasi:
+            continue
+        if not facts:
+            continue
+        anahtar = tuple((f["ad"], f["ara"]) for f in facts)   # rx nesnesi kimliği değil, okunur eşleşme anahtarı
+        gruplar.setdefault(anahtar, []).append(str(item.get("slug", "?")))
+    return [f"{OLGULAR_AYNI_UYARI} (konular: {', '.join(slugs)})" for slugs in gruplar.values() if len(slugs) > 1]
 
 
 # ----------------------------------------------------------------------------- ayrıştırıcılar (çevrimdışı test edilebilir)
@@ -393,6 +420,48 @@ def check_contract(text, minimum=MIN_NOTE_BYTES, minimum_urls=MIN_URLS, expected
     if n_urls < minimum_urls:
         return False, f"yalnız {n_urls} benzersiz URL (<{minimum_urls}): kaynaklı bulgu yok"
     return True, ""
+
+
+def _kod_blogu_disi_basliklar(lines):
+    """'## ' ile başlayan başlık satır indeksleri; ``` / ~~~ kod bloklarının içindekiler sayılmaz."""
+    out, fence = [], None
+    for i, line in enumerate(lines):
+        govde = line.lstrip()
+        if fence is not None:
+            if govde.startswith(fence):
+                fence = None
+            continue
+        if govde.startswith("```") or govde.startswith("~~~"):
+            fence = govde[:3]
+            continue
+        if line.startswith("## "):
+            out.append(i)
+    return out
+
+
+def fazla_bolumleri_kes(text, expected):
+    """Plandaki soru sayısından fazla SONDA '##' bölümü varsa keser: (yeni_metin, atilan_sayı).
+
+    Yalnız ilk `expected` bölüm dört `###` bölümle (denetle.SECTIONS) tamsa ve fazlalık tamamen sondaysa kesilir;
+    uyarı stdout'a yazılır. Fazlalık ortadaysa (yani ilk `expected` bölümden biri eksikse) ya da kod bloğu içinde
+    '##' satırı varsa metin değişmez: eski davranış (check_contract reddi) sürer."""
+    if not expected or expected < 1:
+        return text, 0
+    questions = denetle.parse_note_text(text)
+    if len(questions) <= expected:
+        return text, 0
+    if any(s not in q["bolumler"] for q in questions[:expected] for s in denetle.SECTIONS):
+        return text, 0
+    lines = text.splitlines()
+    basliklar = _kod_blogu_disi_basliklar(lines)
+    if len(basliklar) != len(questions):   # kod bloğu içindeki '##' satırı: güvenilir kesim yok
+        return text, 0
+    atilan = len(questions) - expected
+    yeni = "\n".join(lines[:basliklar[expected]]).rstrip("\n") + "\n"
+    if len(denetle.parse_note_text(yeni)) != expected:
+        return text, 0
+    print(f"arastir: ⚠ notta {len(questions)} '##' bölümü vardı (planda {expected}); sondaki {atilan} fazlalık bölüm kesildi", flush=True)
+    return yeni, atilan
 
 
 def url_count(text):
@@ -563,7 +632,7 @@ def run_worker(item, base, args, start_delay=0.0, sequence=None):
     template = load_template()
     sequence = sequence if sequence is not None else SEQUENCES[args.arka]
     result = {"slug": slug, "ok": False, "deneme": 0, "arka": None, "rc": None, "hata": "", "bayt": 0, "sure_sn": 0, "denemeler": [],
-              "jeton": [0, 0], "araclar": {}}
+              "jeton": [0, 0], "araclar": {}, "ek_bolum_atildi": 0}
     started = time.time()
     budget = args.sure * 2.5 + 120   # çalışan başına toplam duvar saati tavanı: zincir sonsuza dek uzamasın
     index = 0
@@ -592,6 +661,12 @@ def run_worker(item, base, args, start_delay=0.0, sequence=None):
         for name, n in (r.get("araclar") or {}).items():
             result["araclar"][name] = result["araclar"].get(name, 0) + n
         text = note.read_text(encoding="utf-8", errors="replace") if note.exists() else ""
+        if r["rc"] == 0:   # sondaki fazladan '##' bölümü notu düşürmek yerine kes (çalışanı baştan koşturmayalım)
+            kesik, atilan = fazla_bolumleri_kes(text, len(item["sorular"]))
+            if atilan:
+                write_note(note, kesik)
+                text = note.read_text(encoding="utf-8", errors="replace")
+                result["ek_bolum_atildi"] = atilan
         size = len(text.encode("utf-8"))
         result["bayt"] = size
         ok_contract, why = check_contract(text, minimum_urls=item.get("min_url_required", MIN_URLS),
@@ -674,6 +749,8 @@ def main():
     if errors:
         print("arastir: plan hatalı:\n  " + "\n  ".join(errors), file=sys.stderr)
         return 64
+    for uyari in plan_uyarilari(plan):   # hata değil: yalnız uyarı, çıkış kodu değişmez
+        print(f"arastir: ⚠ {uyari}", file=sys.stderr)
 
     base = (Path(args.dizin) if args.dizin else plan_path.parent).resolve()  # mutlak yol: alt süreçlerin cwd/--dir çözümü PWD'ye bağlı kalmasın
     (base / "istemler").mkdir(parents=True, exist_ok=True)
@@ -727,6 +804,9 @@ def main():
         if reusable:
             raw_note = note.read_text(encoding="utf-8", errors="replace")
             safe_note = redact(raw_note)
+            safe_note, atilan = fazla_bolumleri_kes(safe_note, len(item["sorular"]))   # sondaki fazlalık yeniden koşuya yol açmasın
+            if atilan:
+                prev = {**prev, "ek_bolum_atildi": atilan}
             if safe_note != raw_note:
                 note.write_text(safe_note, encoding="utf-8")
             reusable = check_contract(safe_note, minimum_urls=item.get("min_url_required", MIN_URLS),
@@ -818,6 +898,10 @@ def main():
         try:
             dres = destek.run(nd, cache_dir=str(base / "kaynaklar"), files=good)
             (base / "destek.md").write_text(redact(destek.render(dres)), encoding="utf-8")
+            if (base / "notlar-temiz").is_dir():   # yalnız temizlenmiş kopyaları işaretle; orijinal notlar/'a dokunma
+                n_isaret = destek.isaretle(base / "notlar-temiz", dres)
+                if n_isaret:
+                    print(f"arastir: ⚠ {n_isaret} Özet/Çıkarımlar cümlesi notlar-temiz/'de 'kaynakta bulunamadı' diye işaretlendi", flush=True)
             dc = destek.summarize(dres)
             strong = destek.strong_count(dres)
             print("\n" + "=" * 60)

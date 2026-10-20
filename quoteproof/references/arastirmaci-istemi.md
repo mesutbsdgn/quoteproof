@@ -1,6 +1,6 @@
 # Çalışan istem şablonu (arastir.py bunu doldurur)
 
-Yer tutucular: `{{konu}}` `{{amac}}` `{{sorular}}` (numaralı liste) `{{kaynaklar}}` `{{kisitlar}}` `{{bugun}}` `{{okuma}}` (arka uca göre sayfa okuma talimatı)
+Yer tutucular: `{{konu}}` `{{amac}}` `{{sorular}}` (numaralı liste) `{{soru_sayisi}}` `{{kaynaklar}}` `{{kisitlar}}` `{{bugun}}` `{{okuma}}` (arka uca göre sayfa okuma talimatı)
 
 ---
 
@@ -51,6 +51,8 @@ Bugünün tarihi: {{bugun}}. Güncel konularda arama sonuçlarını eğitim veri
 ## <Soru 2>
 … (her soru için aynı dört alt bölüm)
 ```
+
+Tam olarak {{soru_sayisi}} adet `##` soru başlığı yaz (planda kaç soru varsa o kadar); "Genel değerlendirme", "Sonuç", "Kaynak listesi" gibi ek `##` bölümü YAZMA.
 
 Her soru için `###` bölümlerinin **dördü de** bulunmalı (içerik yoksa "—" yaz).
 

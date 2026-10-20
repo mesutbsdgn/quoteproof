@@ -16,8 +16,9 @@ Gürültüyü azaltan kurallar: belge/kayıt numaraları (RFC 9309, FIPS 203, CV
 Sezgiseldir ve kanıt değildir: yalnız SOMUT öğeleri sınar, cümlenin anlamının kaynakla örtüştüğünü söylemez; "temiz" çıktı iddianın doğru olduğu anlamına gelmez.
 Not düzeyindeki bu denetim nihai rapor için `rapor_kontrol.py`'nin yerine geçmez (rapor sentezinde doğan atıf hataları orada aranır).
 
-Kullanım: destek.py NOT_DIZINI [--onbellek DIZIN] [--cikti destek.md] [--dosyalar a.md b.md] [--siki]
+Kullanım: destek.py NOT_DIZINI [--onbellek DIZIN] [--cikti destek.md] [--dosyalar a.md b.md] [--siki] [--isaretle]
   --siki  "hiçbir yerde" bulgusu varsa çıkış kodu 1; varsayılan 0.
+  --isaretle  `hiçbir-yerde` bulgusu olan Özet/Çıkarımlar cümlelerinin satır başına "⚠ [kaynakta bulunamadı: …]" ön eki ekler (yerinde).
 """
 import argparse
 import datetime
@@ -314,6 +315,63 @@ def strong_count(res):
     return sum(1 for r in res.values() for q in r["sorular"] for s in q["cumleler"] for f in s["bulgular"] if f["tur"] == "hiçbir-yerde")
 
 
+KAYNAKTA_YOK_ONEK = "⚠ [kaynakta bulunamadı:"
+
+
+def isaretle(notes_dir, res):
+    """`hiçbir-yerde` bulgusu olan Özet/Çıkarımlar cümlelerinin satır başına "⚠ [kaynakta bulunamadı: öğe; öğe] "
+    ön ekini ekler (dosyayı yerinde yazar; yalnız `hiçbir-yerde` için; idempotent). Döner: işaretlenen cümle sayısı.
+
+    Satır eşlemesi güvenilir bir indeks olmadığından cümle, Özet/Çıkarımlar bölümündeki satırlarda metin aramasıyla
+    bulunur; aynı satırdaki birden çok öğe tek ön ekte birleşir, ön ek zaten varsa satıra dokunulmaz."""
+    notes_dir = Path(notes_dir)
+    isaretlenen = 0
+    for stem, r in res.items():
+        hedef = {}
+        for q in r["sorular"]:
+            for s in q["cumleler"]:
+                ogeler = sorted({f["oge"] for f in s["bulgular"] if f["tur"] == "hiçbir-yerde"})
+                if ogeler and s["cumle"]:
+                    hedef.setdefault(s["cumle"], [])
+                    for o in ogeler:
+                        if o not in hedef[s["cumle"]]:
+                            hedef[s["cumle"]].append(o)
+        if not hedef:
+            continue
+        path = notes_dir / f"{stem}.md"
+        if not path.exists():
+            continue
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+        alt, degisti = None, False
+        for i, line in enumerate(lines):
+            govde = line.strip()
+            if govde.startswith("### "):
+                alt = govde[4:].strip()
+                continue
+            if govde.startswith("## "):
+                alt = None
+                continue
+            if alt not in SECTIONS_CHECKED or line.lstrip().startswith(KAYNAKTA_YOK_ONEK):
+                continue
+            eslesen, n = [], 0
+            for cumle, ogeler in hedef.items():
+                if cumle in line:
+                    eslesen.extend(ogeler)
+                    n += 1
+            if not eslesen:
+                continue
+            birlesik = []
+            for o in eslesen:
+                if o not in birlesik:
+                    birlesik.append(o)
+            lines[i] = f"⚠ [kaynakta bulunamadı: {'; '.join(birlesik)}] " + line
+            isaretlenen += n
+            degisti = True
+        if degisti:
+            path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return isaretlenen
+
+
 def render(res):
     c = summarize(res)
     L = ["# İddia–kanıt destek kontrolü (Özet ve Çıkarımlar cümleleri)", "",
@@ -348,6 +406,8 @@ def main(argv=None):
     ap.add_argument("--dosyalar", nargs="*")
     ap.add_argument("--is", dest="jobs", type=int, default=4)
     ap.add_argument("--siki", action="store_true")
+    ap.add_argument("--isaretle", action="store_true",
+                    help="'hiçbir-yerde' bulgusu olan Özet/Çıkarımlar cümlelerinin satır başına uyarı ön eki ekle (yerinde)")
     a = ap.parse_args(argv)
     d = Path(a.notlar)
     if not d.is_dir():
@@ -355,6 +415,8 @@ def main(argv=None):
         return 2
     cache = a.onbellek or str(d.resolve().parent / "kaynaklar")
     res = run(d, cache_dir=cache, files=a.dosyalar, jobs=a.jobs)
+    if a.isaretle:
+        print(f"destek: {isaretle(d, res)} cümle 'kaynakta bulunamadı' diye işaretlendi ({d})")
     text = render(res)
     if a.cikti:
         Path(a.cikti).write_text(text, encoding="utf-8")

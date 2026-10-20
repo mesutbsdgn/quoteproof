@@ -178,6 +178,11 @@ class Validation(unittest.TestCase):
         self.assertNotIn("{{", text)
         self.assertIn("1. Q1", text)
 
+    def test_istem_ek_soru_bolumu_yazmayi_yasaklar_ve_soru_sayisini_doldurur(self):
+        text = arastir.render({"slug": "a", "konu": "KONU", "sorular": ["Q1", "Q2", "Q3"]}, arastir.load_template())
+        self.assertIn("Tam olarak 3 adet", text)
+        self.assertNotIn("{{soru_sayisi}}", text)
+
 
 class PlanTypes(unittest.TestCase):
     def test_tur_hatalari(self):
@@ -751,7 +756,10 @@ class ContractHardening(unittest.TestCase):
             note.write_text(extra, encoding="utf-8")
             self.assertEqual(len(denetle.parse_note(note)[1]), 2)
 
-    def test_isci_ek_baslikli_notu_hatali_dizine_tasir(self):
+    IKINCI = ("\n## s2?\n### Özet\n—\n### Alıntılı bulgular\n- x \"q q q q\" — [K](https://x.y/z9)\n"
+              "### Çıkarımlar\n—\n### Boşluklar\n—\n")
+
+    def test_isci_sondaki_ek_bolumu_keser_notu_kabul_eder(self):
         def fake(prompt_text, note, *a, **k):
             note.write_text(GOOD_NOTE + "\n## Notlar\nEk açıklama\n", encoding="utf-8")
             return {"rc": 0, "araclar": {"oku_sayfa_oku": 1}}
@@ -760,9 +768,22 @@ class ContractHardening(unittest.TestCase):
             (base / "notlar").mkdir()
             args = mock.Mock(arka="opencode", sure=10, model="fast", efor="dusuk", arama_yok=True, okuyucu="mcp")
             result = arastir.run_worker({"slug": "a", "konu": "k", "sorular": ["s?"]}, base, args, sequence=["opencode"])
-            self.assertFalse(result["ok"])
+            self.assertTrue(result["ok"])                        # sondaki fazladan bölüm kesildi, not geçerli
+            self.assertEqual(result["ek_bolum_atildi"], 1)
+            self.assertNotIn("## Notlar", (base / "notlar" / "a.md").read_text(encoding="utf-8"))
+            self.assertFalse((base / "hatali").exists())
+
+    def test_isci_ortadaki_ek_bolumu_reddeder(self):
+        def fake(prompt_text, note, *a, **k):
+            note.write_text(GOOD_NOTE + "\n## Ekstra\nYalnız metin\n" + self.IKINCI, encoding="utf-8")
+            return {"rc": 0, "araclar": {"oku_sayfa_oku": 1}}
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(arastir, "work_opencode", side_effect=fake):
+            base = Path(d)
+            (base / "notlar").mkdir()
+            args = mock.Mock(arka="opencode", sure=10, model="fast", efor="dusuk", arama_yok=True, okuyucu="mcp")
+            result = arastir.run_worker({"slug": "a", "konu": "k", "sorular": ["s?", "s2?"]}, base, args, sequence=["opencode"])
+            self.assertFalse(result["ok"])                       # fazlalık ortada: eski davranış (red)
             self.assertEqual(result["rc"], 9)
-            self.assertFalse((base / "notlar" / "a.md").exists())
             self.assertTrue((base / "hatali" / "a.deneme1.md").exists())
 
     def test_arama_araci_cagrilmadiysa_opencode_notu_reddedilir(self):
@@ -781,6 +802,61 @@ class ContractHardening(unittest.TestCase):
         self.assertTrue(res["ok"])
         self.assertEqual(res["arka"], "cli")                  # opencode reddedildi, zincir cli ile sürdü
         self.assertIn("arama/okuma", res["denemeler"][0]["hata"])
+
+
+class FazlaBolumKesimi(unittest.TestCase):
+    """Planda beklenen soru sayısından fazla SONDA '##' bölümü varsa kesilir; ortadaysa eski davranış (red)."""
+    EK = "\n## Genel değerlendirme\nPlanda olmayan fazladan bölüm.\n"
+
+    def test_sondaki_fazla_bolum_kesilir_ve_not_gecerli_sayilir(self):
+        metin = GOOD_NOTE + self.EK
+        self.assertFalse(arastir.check_contract(metin, expected_questions=1)[0])
+        yeni, atilan = arastir.fazla_bolumleri_kes(metin, 1)
+        self.assertEqual(atilan, 1)
+        self.assertNotIn("Genel değerlendirme", yeni)
+        self.assertTrue(arastir.check_contract(yeni, expected_questions=1)[0])
+
+    def test_ortadaki_fazla_bolum_reddedilir(self):
+        metin = GOOD_NOTE + "\n## Ekstra\nYalnız metin\n" + ContractHardening.IKINCI
+        yeni, atilan = arastir.fazla_bolumleri_kes(metin, 2)
+        self.assertEqual((atilan, yeni), (0, metin))
+        self.assertFalse(arastir.check_contract(metin, expected_questions=2)[0])
+
+    def test_kod_blogundaki_baslik_sayilmaz(self):
+        metin = GOOD_NOTE.replace("### Boşluklar\n—\n", "### Boşluklar\n```\n## sahte başlık\n```\n")
+        self.assertEqual(arastir.fazla_bolumleri_kes(metin, 1), (metin, 0))
+
+
+class PlanUyarilari(unittest.TestCase):
+    """Aynı `olgular` listesi birden çok konuya yazıldıysa uyarı (hata değil); farklıysa sessiz."""
+    AYNI = [{"slug": "a", "konu": "k1", "sorular": ["s?"], "olgular": [{"ad": "x", "ara": "x"}]},
+            {"slug": "b", "konu": "k2", "sorular": ["s?"], "olgular": [{"ad": "x", "ara": "x"}]}]
+    FARKLI = [{"slug": "a", "konu": "k1", "sorular": ["s?"], "olgular": [{"ad": "x", "ara": "x"}]},
+              {"slug": "b", "konu": "k2", "sorular": ["s?"], "olgular": [{"ad": "y", "ara": "y"}]}]
+
+    def test_ayni_olgular_uyari_farkli_sessiz(self):
+        uyarilar = arastir.plan_uyarilari(self.AYNI)
+        self.assertTrue(uyarilar)
+        self.assertIn("olgular konular arasında aynı", uyarilar[0])
+        self.assertFalse(arastir.validate(self.AYNI))            # uyarı hata değil: plan geçerli
+        self.assertEqual(arastir.plan_uyarilari(self.FARKLI), [])
+        self.assertEqual(arastir.plan_uyarilari(self.AYNI[:1]), [])   # tek konu: uyarı yok
+
+    def test_uyari_stderr_e_yazilir_cikis_kodu_degismez(self):
+        with tempfile.TemporaryDirectory() as d:
+            Path(d, "PLAN.json").write_text(json.dumps(self.AYNI), encoding="utf-8")
+            def fake(item, base, args, delay=0.0, sequence=None):
+                (base / "notlar" / f"{item['slug']}.md").write_text(GOOD_NOTE)
+                return {"slug": item["slug"], "ok": True, "deneme": 1, "arka": "cli", "rc": 0, "hata": "", "bayt": len(GOOD_NOTE),
+                        "sure_sn": 1, "denemeler": [], "jeton": [0, 0], "araclar": {}}
+            argv = ["arastir.py", str(Path(d) / "PLAN.json"), "-d", d, "--link-yok", "--arka", "cli"]
+            err = io.StringIO()
+            with mock.patch.object(sys, "argv", argv), mock.patch.object(arastir, "available_backends", return_value={"cli"}), \
+                 mock.patch.object(arastir, "run_worker", side_effect=fake), mock.patch.object(arastir.kapsama, "run", return_value={}), \
+                 mock.patch.object(arastir.subprocess, "run", return_value=mock.Mock(returncode=0)), contextlib.redirect_stderr(err):
+                rc = arastir.main()
+            self.assertEqual(rc, 0)                               # uyarı çıkış kodunu değiştirmez
+            self.assertIn("olgular konular arasında aynı", err.getvalue())
 
 
 class RateLimitChain(unittest.TestCase):
@@ -886,7 +962,7 @@ class Resume(unittest.TestCase):
             self._main(d, ["--devam"], fake)
         self.assertEqual(calls, ["a"])
 
-    def test_ek_baslikli_not_devamda_yeniden_uretilir(self):
+    def test_sondaki_ek_bolum_devamda_kesilir_ve_yeniden_kullanilir(self):
         calls = []
         def fake(item, base, args, delay=0.0, sequence=None):
             calls.append(item["slug"])
@@ -899,7 +975,25 @@ class Resume(unittest.TestCase):
             (Path(d) / "notlar" / "a.md").write_text(GOOD_NOTE + "\n## Notlar\nEk açıklama\n")
             calls.clear()
             self._main(d, ["--devam"], fake)
-        self.assertEqual(calls, ["a"])
+            self.assertEqual(calls, [])                                          # sondaki fazlalık kesildi, not yeniden kullanıldı
+            self.assertNotIn("## Notlar", (Path(d) / "notlar" / "a.md").read_text(encoding="utf-8"))
+
+    def test_ortadaki_ek_bolum_devamda_yeniden_uretilir(self):
+        calls = []
+        def fake(item, base, args, delay=0.0, sequence=None):
+            calls.append(item["slug"])
+            (base / "notlar" / f"{item['slug']}.md").write_text(GOOD_NOTE)
+            return {"slug": item["slug"], "ok": True, "deneme": 1, "arka": "cli", "rc": 0, "hata": "", "bayt": len(GOOD_NOTE),
+                    "sure_sn": 1, "denemeler": [], "jeton": [1, 1], "araclar": {}}
+        ortada = GOOD_NOTE + "\n## Ekstra\nYalnız metin\n" + ContractHardening.IKINCI
+        with tempfile.TemporaryDirectory() as d:
+            plan = [{"slug": "a", "konu": "k", "sorular": ["s?", "s2?"]}]
+            (Path(d) / "PLAN.json").write_text(json.dumps(plan), encoding="utf-8")
+            self._main(d, [], fake)
+            (Path(d) / "notlar" / "a.md").write_text(ortada)
+            calls.clear()
+            self._main(d, ["--devam"], fake)
+        self.assertEqual(calls, ["a"])                                           # fazlalık ortada: eski davranış, yeniden koşar
 
     def test_devam_dar_konu_icin_iki_url_notunu_korur(self):
         item = {"slug": "dar", "konu": "k", "sorular": ["s?"], "min_url_required": 2}
@@ -2403,6 +2497,18 @@ class DestekKontrol(unittest.TestCase):
             self.assertEqual(self._flags(res), [])
             self.assertEqual(res["konu"]["sorular"][0]["okunamayan"], [self.URL1])
             self.assertIn("denetlenemedi", destek.render(res))
+
+    def test_isaretle_on_ek_ekler_idempotent_ve_temiz_cumleye_dokunmaz(self):
+        with tempfile.TemporaryDirectory() as d:
+            self._note(d, "Ek yük yaklaşık %37 olarak ölçüldü. Geçerli cümle burada kalır.")
+            res = self._run(d)
+            self.assertEqual(destek.isaretle(d, res), 1)
+            text = (Path(d) / "konu.md").read_text(encoding="utf-8")
+            self.assertIn("⚠ [kaynakta bulunamadı: %37] Ek yük yaklaşık %37 olarak ölçüldü.", text)
+            self.assertIn("Geçerli cümle burada kalır.", text)
+            self.assertNotIn("kaynakta bulunamadı: %37] Geçerli", text)
+            self.assertEqual(destek.isaretle(d, res), 0)                     # idempotent: ön ek tek kez
+            self.assertEqual((Path(d) / "konu.md").read_text(encoding="utf-8").count("kaynakta bulunamadı"), 1)
 
     def test_cikarim_ve_birim_cikti_ve_siki_cikis_kodu(self):
         with tempfile.TemporaryDirectory() as d:
