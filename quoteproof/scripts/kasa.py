@@ -9,7 +9,8 @@ doğrulanmalı?" sorusu ucuza cevaplanır.
 Veritabanı: `--db`, yoksa QUOTEPROOF_KASA ortam değişkeni, yoksa ~/.local/share/quoteproof/kasa.db (üst dizin gerekirse oluşturulur).
 
 Girdi: oku.py önbellek dosyaları (her biri <24hex>.json; alanlar: istenen_url, ok, markdown, fetched_at, isteğe bağlı baslik/yontem).
-Yalnız `ok=true` ve `markdown` boş olmayan dosyalar alınır; bozuk JSON ve ok=false atlanır.
+Yalnız `ok=true` ve `markdown` boş olmayan dosyalar alınır; bozuk JSON ve ok=false atlanır. Sayfalar kanonik URL anahtarıyla
+kaydedilir (şema/host küçük harf, http→https, www atılır, fragment ve izleme parametreleri atılır): aynı sayfanın iki URL biçimi tek kayıt olur.
 
 Kullanım:
   python3 kasa.py ekle KAYNAKLAR_DIZINI [DIZIN ...]
@@ -28,7 +29,7 @@ import sqlite3
 import sys
 import time
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 sys.dont_write_bytecode = True
 
@@ -40,6 +41,9 @@ GRUP_KIMLIK_UZUNLUK = 12   # sha1 hex ilk kaç karakter grup kimliği olur
 VARSAYILAN_ESKI_GUN = 30
 OZET_UZUNLUK = 150
 URL_RE = re.compile(r"https?://[^\s<>\"'\)\]]+")
+IZLEME_ONEK_RE = re.compile(r"utm_|^aff", re.I)     # izleme parametreleri: utm_*, aff*
+IZLEME_AD_RE = frozenset({"fbclid", "gclid", "ref"})
+VARSAYILAN_PORT = {"http": "80", "https": "443"}
 
 SEMA_SAYFA = """CREATE TABLE IF NOT EXISTS sayfa(
     url TEXT PRIMARY KEY, host TEXT, baslik TEXT, alindi REAL,
@@ -85,6 +89,38 @@ def _host(url):
         return ""
     net = net.split("@")[-1].split(":")[0]
     return net[4:] if net.startswith("www.") else net
+
+
+def url_kanonik(url):
+    """URL'yi kopya/kaynak sayımı için kanonikleştirir: şema ve host küçük harf, http→https, `www.` atılır,
+    fragment atılır, izleme parametreleri (utm_*, fbclid, gclid, ref, aff*) atılır, kalan sorgu parametreleri
+    sıralanır, yolun sonundaki '/' (kök hariç) ve varsayılan port atılır. Kanonikleştirilemeyen girdide "" döner.
+
+    Kanonik anahtar sayesinde aynı sayfanın iki URL biçimi (www'li/www'siz, http/https, izleme parametreli) TEK kayıt olur.
+    """
+    try:
+        p = urlsplit((url or "").strip())
+    except (ValueError, AttributeError):
+        return ""
+    if not p.netloc:
+        return ""
+    ham_sema = (p.scheme or "").lower()
+    sema = "https" if ham_sema in ("", "http") else ham_sema
+    netloc = p.netloc.lower()
+    if "@" in netloc:
+        netloc = netloc.split("@")[-1]
+    host, _, port = netloc.partition(":")
+    if host.startswith("www."):
+        host = host[4:]
+    if port and port != VARSAYILAN_PORT.get(ham_sema):
+        netloc = f"{host}:{port}"
+    else:
+        netloc = host
+    pairs = [(k, v) for k, v in parse_qsl(p.query, keep_blank_values=True)
+             if not IZLEME_ONEK_RE.search(k) and k.lower() not in IZLEME_AD_RE]
+    sorgu = urlencode(sorted(pairs))
+    yol = p.path.rstrip("/") or "/"
+    return urlunsplit((sema, netloc, yol, sorgu, ""))
 
 
 def _sha1(metin):
@@ -219,7 +255,8 @@ def _grup_hesapla(con):
 
 
 def ekle(db, dizinler):
-    """Önbellek dizinlerini kasaya ekler/günceller. Aynı URL yalnız fetched_at daha yeniyse yenilenir (idempotent).
+    """Önbellek dizinlerini kasaya ekler/günceller. Sayfalar KANONİK URL anahtarıyla kaydedilir (aynı sayfanın iki URL
+    biçimi tek kayıt). Aynı URL yalnız fetched_at daha yeniyse yenilenir (idempotent).
 
     Döner: {"eklendi","yenilendi","atlandi","gecerli","kopya_grubu","sayfa"}.
     """
@@ -230,23 +267,24 @@ def ekle(db, dizinler):
             sayfalar = sayfalari_yukle(dizin)
             for s in sayfalar:
                 gecerli += 1
-                var = con.execute("SELECT alindi FROM sayfa WHERE url=?", (s["url"],)).fetchone()
+                url = url_kanonik(s["url"]) or s["url"]
+                var = con.execute("SELECT alindi FROM sayfa WHERE url=?", (url,)).fetchone()
                 if var is not None:
                     if s["alindi"] <= (var["alindi"] or 0.0):
                         atlandi += 1
                         continue
-                    con.execute("DELETE FROM pasaj WHERE url=?", (s["url"],))
+                    con.execute("DELETE FROM pasaj WHERE url=?", (url,))
                     yenilendi += 1
                 else:
                     eklendi += 1
                 pasajlar = pasajlara_bol(s["metin"])
                 con.executemany("INSERT INTO pasaj(url, sira, metin) VALUES (?,?,?)",
-                                [(s["url"], i, p) for i, p in enumerate(pasajlar)])
+                                [(url, i, p) for i, p in enumerate(pasajlar)])
                 con.execute("INSERT INTO sayfa(url, host, baslik, alindi, uzunluk, icerik_hash, kopya_grubu) "
                             "VALUES (?,?,?,?,?,?,NULL) "
                             "ON CONFLICT(url) DO UPDATE SET host=excluded.host, baslik=excluded.baslik, "
                             "alindi=excluded.alindi, uzunluk=excluded.uzunluk, icerik_hash=excluded.icerik_hash",
-                            (s["url"], s["host"], s["baslik"], s["alindi"], len(s["metin"]), _sha1(s["metin"])))
+                            (url, s["host"], s["baslik"], s["alindi"], len(s["metin"]), _sha1(s["metin"])))
         gruplar = _grup_hesapla(con)
         con.commit()
     finally:
@@ -334,14 +372,15 @@ def bagimsiz_alan_adi_sayisi(urls, db):
     try:
         birim = set()
         for u in urls:
-            r = con.execute("SELECT host, kopya_grubu FROM sayfa WHERE url=?", (u,)).fetchone()
+            c = url_kanonik(u) or u
+            r = con.execute("SELECT host, kopya_grubu FROM sayfa WHERE url=?", (c,)).fetchone()
             gid = r["kopya_grubu"] if r else None
             if gid:
                 n = con.execute("SELECT COUNT(*) FROM sayfa WHERE kopya_grubu=?", (gid,)).fetchone()[0]
                 if n > 1:
                     birim.add(("grup", gid))
                     continue
-            birim.add(("host", r["host"] if r else _host(u)))
+            birim.add(("host", r["host"] if r else _host(c)))
         return len(birim)
     finally:
         con.close()
@@ -386,7 +425,7 @@ def guncelle_plan(db, plan_yolu, eski_dizin, cikti=None, eski_gun=VARSAYILAN_ESK
         raise KasaHatasi(f"kaynaklar dizini yok: {kaynak_diz}")
     con = baglan(db)
     try:
-        kasa_urlleri = {r["url"] for r in con.execute("SELECT url FROM sayfa")}
+        kasa_urlleri = {url_kanonik(r["url"]) for r in con.execute("SELECT url FROM sayfa")}
         gecerli = set()
         for dosya in sorted(kaynak_diz.glob("*.json")):
             try:
@@ -395,8 +434,8 @@ def guncelle_plan(db, plan_yolu, eski_dizin, cikti=None, eski_gun=VARSAYILAN_ESK
                 continue
             if isinstance(d, dict):
                 u = d.get("istenen_url") or d.get("url")
-                if isinstance(u, str) and u in kasa_urlleri:
-                    gecerli.add(u)
+                if isinstance(u, str) and url_kanonik(u) in kasa_urlleri:
+                    gecerli.add(url_kanonik(u))
         notlar = eski / "notlar"
         yeni, konu = [], 0
         for item in plan:
@@ -408,10 +447,11 @@ def guncelle_plan(db, plan_yolu, eski_dizin, cikti=None, eski_gun=VARSAYILAN_ESK
             note = notlar / f"{slug}.md" if slug else None
             if note is not None and note.is_file():
                 for u in _not_urls(note.read_text(encoding="utf-8", errors="ignore")):
-                    if u in gecerli:
-                        r = con.execute("SELECT alindi FROM sayfa WHERE url=?", (u,)).fetchone()
+                    c = url_kanonik(u)
+                    if c in gecerli:
+                        r = con.execute("SELECT alindi FROM sayfa WHERE url=?", (c,)).fetchone()
                         if r is not None:
-                            eslesen.append((u, r["alindi"] or 0.0))
+                            eslesen.append((c, r["alindi"] or 0.0))
             if not eslesen:
                 yeni.append(item)
                 continue

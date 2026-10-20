@@ -125,6 +125,39 @@ class KasaTemel(unittest.TestCase):
 
 
 class YardimciTestleri(unittest.TestCase):
+    def test_url_kanonik_tablosu(self):
+        ornekler = {
+            "HTTPS://WWW.Example.COM/Yol/": "https://example.com/Yol",
+            "http://example.com": "https://example.com/",
+            "https://example.com:443/a": "https://example.com/a",
+            "http://example.com:80/a": "https://example.com/a",
+            "https://example.com:8443/a": "https://example.com:8443/a",
+            "https://example.com/a#bolum": "https://example.com/a",
+            "https://example.com/a?utm_source=x&b=2&a=1": "https://example.com/a?a=1&b=2",
+            "https://example.com/a?fbclid=z&ref=twitter&aff_id=9&q=1": "https://example.com/a?q=1",
+            "https://example.com/a?b=2&a=1": "https://example.com/a?a=1&b=2",
+            "https://www.example.com/": "https://example.com/",
+            "mailto:a@b.com": "",
+            "": "",
+        }
+        for girdi, beklenen in ornekler.items():
+            self.assertEqual(kasa.url_kanonik(girdi), beklenen, girdi)
+        self.assertEqual(kasa.url_kanonik("https://EXAMPLE.com/x?A=1#frag"), kasa.url_kanonik("http://www.example.com/x?A=1"))
+
+    def test_ayni_sayfanin_iki_url_bicimi_tek_kayit(self):
+        with tempfile.TemporaryDirectory() as t:
+            kaynak = Path(t) / "kaynaklar"
+            kaynak.mkdir()
+            db = str(Path(t) / "k.db")
+            yaz(kaynak, "a" * 24, "https://www.example.com/x?utm_source=n", UZUN, 1000.0)
+            yaz(kaynak, "b" * 24, "http://example.com/x", UZUN, 2000.0)
+            s = kasa.ekle(db, [str(kaynak)])
+            self.assertEqual(kasa.istatistik(db)["sayfa"], 1, "kanonik anahtar: tek kayıt")
+            self.assertEqual(s["sayfa"], 1)
+            self.assertEqual(s["eklendi"], 1)
+            self.assertEqual(s["yenilendi"], 1)   # ikinci biçim daha yeni fetched_at ile güncelledi
+            self.assertEqual(kasa.ara(db, "bellek")[0]["url"], "https://example.com/x")
+
     def test_pasajlara_bol_paragraf_ve_sert_bolme(self):
         p = kasa.pasajlara_bol("a" * 600 + "\n\n" + "b" * 600 + "\n\n" + "c" * 50)
         self.assertTrue(all(len(x) <= kasa.PASAJ_HEDEF for x in p))
