@@ -5,9 +5,9 @@ URL → {"puan": 0-100, "sinif": ..., "gerekce": [...]}. Şeffaf bir buluşsald�
 + (isteğe bağlı) PLAN.json `kaynaklar` ipuçları. Puan KANIT DEĞİLDİR; hangi bulguyu önce elle doğrulayacağını ve hangisinin
 tek başına rapora girmemesi gerektiğini söyleyen bir ÖNCELİK sinyalidir. İçerik doğruluğu `dogrula.py` + Claude'a aittir.
 
-Sınıflar (taban puan): resmî/standart 90 · güvenlik standardı/rehberi 88 · akademik 85 · resmî doküman 80 · ön baskı 70 · haber 70 · sektör basını 68 · teknik basın 65 ·
+Sınıflar (taban puan): resmî/standart 90 · güvenlik standardı/rehberi 88 · akademik 85 · resmî doküman 80 · ön baskı 70 · haber 70 · sektör basını 68 · teknik basın 65 (donanım/sistem basını 62) ·
 kod deposu 65 · ansiklopedi 60 · topluluk 25-55 · belirsiz 50. Sinyaller: planda beklenen kaynak +10, http −10, IP adresi −15,
-SEO/derleme URL kalıbı −8, şüpheli TLD −10, izleme parametresi −3.
+SEO/derleme URL kalıbı −8 (tek başına "vs" teknik karşılaştırma yolu −3), şüpheli TLD −10, izleme parametresi −3.
 
 Kullanım:
   guven.py URL [URL ...] [--plan PLAN.json] [--slug SLUG]
@@ -57,6 +57,10 @@ CLASSES = [
                            "schneier.com", "helpnetsecurity.com", "securelist.com", "welivesecurity.com", "blog.talosintelligence.com",
                            "unit42.paloaltonetworks.com"]),
     ("teknik basın", 65, ["arstechnica.com", "theregister.com", "infoq.com", "lwn.net", "theverge.com", "wired.com", "techcrunch.com"]),
+    # Donanım/sistem teknik basını: yerleşik, kolayca doğrulanabilir yayınlar (phoronix.com, hardware-corner.net gibi siteler
+    # "belirsiz 50" alıp SEO yoluyla 42'ye düşüyordu). Ad mevcut "teknik basın" (65) ile aynı ama alan adları çakışmaz; en uzun sonek kuralı korunur.
+    ("teknik basın", 62, ["phoronix.com", "anandtech.com", "tomshardware.com", "servethehome.com", "notebookcheck.net",
+                          "techpowerup.com", "hardware-corner.net", "semianalysis.com", "chipsandcheese.com"]),
     ("topluluk", 55, ["stackoverflow.com", "stackexchange.com", "serverfault.com", "superuser.com", "askubuntu.com"]),
     ("topluluk", 45, ["substack.com", "hashnode.dev", "gist.github.com"]),
     ("topluluk", 40, ["medium.com", "dev.to", "news.ycombinator.com", "blogspot.com", "wordpress.com", "tumblr.com", "linkedin.com"]),
@@ -70,7 +74,9 @@ DOC_PREFIX_SCORE = 55
 MULTI_TENANT = ("medium.com", "github.io", "gitlab.io", "blogspot.com", "wordpress.com", "substack.com", "tumblr.com", "hashnode.dev",
                 "netlify.app", "vercel.app", "pages.dev", "herokuapp.com", "web.app", "firebaseapp.com", "notion.site", "readthedocs.io")
 SUSPICIOUS_TLDS = {"xyz", "top", "click", "buzz", "icu", "monster", "rest", "cyou", "sbs", "cfd", "gq", "tk", "ml", "ga", "cf"}
-SEO_PATH = re.compile(r"(?:^|[/-])(best|top-?\d+|\d+-best|vs|review|reviews|coupon|coupons|alternatives|cheap|affiliate|ultimate-guide|deals?)(?:[/-]|$)", re.I)
+SEO_PATH = re.compile(r"(?:^|[/-])(best|top-?\d+|\d+-best|review|reviews|coupon|coupons|alternatives|cheap|affiliate|ultimate-guide|deals?)(?:[/-]|$)", re.I)
+# Tek başına "vs" teknik KARŞILAŞTIRMA yoludur (örn. /mlx-vs-llama-cpp): derleme/SEO kalıbından daha hafif ceza (−3).
+VS_PATH = re.compile(r"(?:^|[/-])vs(?:[/-]|$)", re.I)
 TRACKING = re.compile(r"(?:^|&)(utm_[a-z]+|aff[a-z_]*|ref|fbclid|gclid)=", re.I)
 # Çalışan künyesi: parantez içinde birincil|ikincil geçen grup. Gerçek çıktılarda görülen biçimler: (2026-08, birincil) ·
 # (2024-08-08; birincil) · (2024-09/2026-08, birincil) · (v2; 2024-09/2026-08, birincil) · (tarih belirtilmemiş; birincil)
@@ -170,6 +176,9 @@ def score(url, hints=None):
     if SEO_PATH.search(parsed.path):
         points -= 8
         reasons.append("SEO/derleme URL kalıbı (−8)")
+    elif VS_PATH.search(parsed.path):
+        points -= 3
+        reasons.append("teknik karşılaştırma URL kalıbı (−3)")
     if TRACKING.search(parsed.query or ""):
         points -= 3
         reasons.append("izleme/ortaklık parametresi (−3)")
