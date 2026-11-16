@@ -9,6 +9,11 @@ description: >-
   doğrulamasını 0 token'lık betiklerle yapar, kritik iddiaları kendisi doğrular ve Türkçe,
   kaynaklı, öğretici bir rapor yazar. Tek bir olgu/sürüm/fiyat sorusu için KULLANMA (doğrudan bir
   web arama aracı yeter); yerel kod/depo incelemesi için KULLANMA.
+  Use when a question needs multi-source, cited research.
+version: "1.0.0"
+metadata:
+  author: mesutbsdgn
+  tags: [research, citations, verification, turkish]
 ---
 
 # quoteproof — araştır ve öğren
